@@ -1,0 +1,72 @@
+{
+  "id": "html-9",
+  "title": "Forms and Input Types",
+  "slug": "09-forms-and-input-types",
+  "category": "html",
+  "chapterNumber": 9,
+  "level": "intermediate",
+  "estimatedTime": "10 min",
+  "theory": {
+    "english": "Forms and Input Types teaches HTML concepts in a practical sequence. This lesson explains not only how the syntax works, but also when to use it in real projects. You will learn patterns that reduce bugs, improve readability, and make your code easier to maintain in production.",
+    "hindi": "Forms and Input Types lesson me HTML concept ko practical tarike se samjhaya gaya hai. Isme sirf syntax nahi, balki real project me is feature ko kab aur kaise use karna hai, ye bhi clear kiya gaya hai. Focus clean code, kam bugs, aur maintainable approach par hai.",
+    "hinglish": "Forms and Input Types lesson me HTML ka concept step-by-step clear kiya gaya hai. Sirf syntax yaad nahi karna, balki real project me kab use karna hai ye samajhna hai. Goal hai clean code, fewer bugs, aur better maintainability."
+  },
+  "examples": [
+    {
+      "title": "Basic Example",
+      "code": "<section>\n  <h2>Forms and Input Types</h2>\n  <p>Learning HTML in DevSchool Pro.</p>\n</section>",
+      "explanation": "Start with the minimal version first, then layer improvements such as semantics, accessibility, and reusable structure."
+    },
+    {
+      "title": "Real World Use Case",
+      "code": "<article>\n  <header><h3>Product Card</h3></header>\n  <p>Used in ecommerce listings.</p>\n</article>",
+      "explanation": "This pattern is frequently used in dashboards, course pages, and interactive products where structure and clarity matter."
+    }
+  ],
+  "exercises": [
+    {
+      "prompt": "Create a mini task using Forms and Input Types.",
+      "expectedOutcome": "Code runs correctly and follows clean structure."
+    },
+    {
+      "prompt": "Refactor one example to improve readability and accessibility.",
+      "expectedOutcome": "Better naming, better structure, and fewer mistakes."
+    }
+  ],
+  "quiz": [
+    {
+      "question": "What is the main goal of Forms and Input Types?",
+      "options": [
+        "Visual design only",
+        "Cleaner structure and reliable behavior",
+        "Database migration",
+        "Server deployment"
+      ],
+      "answer": 1,
+      "explanation": "The lesson focuses on writing reliable and maintainable code patterns, not only visual or infrastructure concerns."
+    },
+    {
+      "question": "What should you prioritize first while learning?",
+      "options": [
+        "Memorizing all syntax",
+        "Building tiny practical examples",
+        "Skipping fundamentals",
+        "Using random hacks"
+      ],
+      "answer": 1,
+      "explanation": "Small practical examples build intuition and transferable understanding faster than rote memorization."
+    },
+    {
+      "question": "Which approach is better for production quality?",
+      "options": [
+        "Copy without understanding",
+        "Use deprecated patterns",
+        "Write readable tested code",
+        "Ignore edge cases"
+      ],
+      "answer": 2,
+      "explanation": "Readable code with clear intent and validation is more scalable and safer for real projects."
+    }
+  ],
+  "summary": "Forms and Input Types complete hua. Aapne concept, practical usage, aur mistakes avoid karne ka clear workflow seekh liya."
+}
