@@ -6,6 +6,9 @@
 -- Files execute in alphabetical order: 000_ → 001_ → 002_ → 003_
 -- ============================================================
 
+-- ─── Extensions ───────────────────────────────────────────
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 -- ─── Profiles (User Data) ─────────────────────────────────
 CREATE TABLE IF NOT EXISTS profiles (
   id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
