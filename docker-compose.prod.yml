@@ -1,0 +1,119 @@
+# ============================================================
+# 🐳 DevSchool Pro — Backend-Only Production Docker Compose
+# ============================================================
+#
+# ARCHITECTURE (Backend Only):
+#   ┌──────────┐    ┌──────────┐    ┌──────────┐
+#   │ Backend  │───▶│ Postgres │    │  Redis   │
+#   │  :4000   │    │  :5432   │    │  :6379   │
+#   └──────────┘    └──────────┘    └──────────┘
+#
+# Frontend + Admin run LOCALLY on developer's machine.
+#
+# COMMANDS:
+#   docker compose -f docker-compose.prod.yml up -d                → Start everything
+#   docker compose -f docker-compose.prod.yml logs -f backend      → Stream backend logs
+#   docker compose -f docker-compose.prod.yml down                 → Stop (DATA PRESERVED)
+#   docker compose -f docker-compose.prod.yml down -v              → Stop + DELETE ALL DATA ⚠️
+#   docker compose -f docker-compose.prod.yml up -d --build backend → Rebuild backend only
+#   docker compose -f docker-compose.prod.yml restart backend      → Restart backend
+#   docker compose -f docker-compose.prod.yml ps                   → Status of all services
+#
+# ============================================================
+
+services:
+
+  # ── 1. PostgreSQL Database ─────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: devschool-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: devschool
+      POSTGRES_PASSWORD: devschool_secure_2026
+      POSTGRES_DB: devschool_pro
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devschool -d devschool_pro"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - devschool-network
+    command: >
+      postgres
+        -c shared_buffers=256MB
+        -c effective_cache_size=512MB
+        -c work_mem=16MB
+        -c maintenance_work_mem=128MB
+        -c max_connections=100
+        -c log_min_duration_statement=500
+
+  # ── 2. Redis (Cache + Rate Limiting) ───────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: devschool-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - devschool-network
+
+  # ── 3. Backend API Server ──────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: devschool-backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # Override for Docker internal networking
+      DATABASE_URL: postgresql://devschool:devschool_secure_2026@postgres:5432/devschool_pro
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - devschool-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+# ── Volumes (PERMANENT STORAGE) ──────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+    name: devschool-postgres-data
+  redis_data:
+    driver: local
+    name: devschool-redis-data
+
+# ── Network ──────────────────────────────────────────────────
+networks:
+  devschool-network:
+    driver: bridge
+    name: devschool-network
