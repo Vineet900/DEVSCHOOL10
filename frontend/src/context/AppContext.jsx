@@ -1,9 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { getCourseQuizzes, getCourses, fetchContentFromDB } from '../content/lessonStore'
 import { t } from '../data/i18n'
-import { isSupabaseConfigured, supabase } from '../lib/supabase'
-import { userAPI } from '../lib/api'
+import { isSupabaseConfigured, supabase, customMockStorage, SUPABASE_STORAGE_KEY } from '../lib/supabase'
+import { userAPI, authAPI, quizAPI, roadmapAPI } from '../lib/api'
 import {
   clampNumber,
   DAILY_GOAL_LIMITS,
@@ -61,6 +61,10 @@ function createDefaultState() {
     profileEmail: '',
     profilePhone: '',
     profileBio: '',
+    profileLocation: '',
+    profilePortfolio: '',
+    profileTechStack: [],
+    profileLearningGoals: [],
     themePreference: 'system',
     darkMode: false,
     language: 'en',
@@ -72,6 +76,8 @@ function createDefaultState() {
     profileVisible: true,
     streak: 1,
     studyHours: 0,
+    studyTimeMinutes: 0,
+    lastActiveDate: '',
     completedChapters: {},
     quizScores: {},
     completedProjects: [],
@@ -179,6 +185,10 @@ function normalizePersistedState(parsed) {
     profileEmail: String(parsed.profileEmail || '').trim().toLowerCase(),
     profilePhone: String(parsed.profilePhone || '').trim(),
     profileBio: String(parsed.profileBio || '').trim().slice(0, 240),
+    profileLocation: String(parsed.profileLocation || '').trim(),
+    profilePortfolio: String(parsed.profilePortfolio || '').trim(),
+    profileTechStack: Array.isArray(parsed.profileTechStack) ? parsed.profileTechStack : [],
+    profileLearningGoals: Array.isArray(parsed.profileLearningGoals) ? parsed.profileLearningGoals : [],
     themePreference,
     darkMode: resolveThemePreference(themePreference, false),
     language,
@@ -190,6 +200,8 @@ function normalizePersistedState(parsed) {
     profileVisible: parsed.profileVisible !== false,
     streak: Math.max(0, Number(parsed.streak ?? base.streak)),
     studyHours: Math.max(0, Number(parsed.studyHours || 0)),
+    studyTimeMinutes: Math.max(0, Number(parsed.studyTimeMinutes || 0)),
+    lastActiveDate: String(parsed.lastActiveDate || ''),
     completedChapters:
       parsed.completedChapters && typeof parsed.completedChapters === 'object' && !Array.isArray(parsed.completedChapters)
         ? parsed.completedChapters
@@ -284,6 +296,10 @@ function buildDisplayUser(baseUser, stateSlice) {
     username,
     avatar: stateSlice.profileAvatar || '',
     bio: stateSlice.profileBio || '',
+    location: stateSlice.profileLocation || '',
+    portfolio: stateSlice.profilePortfolio || '',
+    techStack: stateSlice.profileTechStack || [],
+    learningGoals: stateSlice.profileLearningGoals || [],
   }
 }
 
@@ -330,12 +346,21 @@ export function AppProvider({ children }) {
   const [contentReady, setContentReady] = useState(false)
   const persistIdentityRef = useRef(null)
   const [notice, setNotice] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [dbError, setDbError] = useState(null)
+  const [customRoadmaps, setCustomRoadmaps] = useState([])
+
+  const courses = useMemo(() => contentReady ? getCourses() : [], [contentReady])
+  const courseQuizzes = useMemo(() => contentReady ? getCourseQuizzes() : {}, [contentReady])
 
   useEffect(() => {
     let cancelled = false
 
     async function boot() {
-      await fetchContentFromDB()
+      const contentRes = await fetchContentFromDB()
+      if (contentRes?.error) {
+        if (!cancelled) setDbError(contentRes.error)
+      }
       if (!cancelled) {
         setContentReady(true)
         // Set the initial selected chapter now that content is loaded
@@ -355,9 +380,29 @@ export function AppProvider({ children }) {
         return
       }
 
+      // Manually restore session from customMockStorage
+      try {
+        const storedToken = customMockStorage.getItem(SUPABASE_STORAGE_KEY)
+        if (storedToken) {
+          const parsedSession = JSON.parse(storedToken)
+          if (parsedSession?.access_token && parsedSession?.refresh_token) {
+            const { data: setSessionData, error: setSessionErr } = await supabase.auth.setSession(parsedSession)
+            if (setSessionErr) {
+              console.warn('Manual setSession error:', setSessionErr.message)
+            } else if (setSessionData?.session && !cancelled) {
+              setSession(setSessionData.session)
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to restore session from storage:', err)
+      }
+
       const { data } = await supabase.auth.getSession()
       if (!cancelled) {
-        setSession(data.session ?? null)
+        if (data.session) {
+          setSession(data.session)
+        }
         setAuthReady(true)
       }
     }
@@ -365,6 +410,11 @@ export function AppProvider({ children }) {
     boot()
     const sub =
       supabase?.auth?.onAuthStateChange((_event, nextSession) => {
+        if (nextSession) {
+          customMockStorage.setItem(SUPABASE_STORAGE_KEY, JSON.stringify(nextSession))
+        } else {
+          customMockStorage.removeItem(SUPABASE_STORAGE_KEY)
+        }
         setSession(nextSession)
       }) ?? null
 
@@ -373,6 +423,61 @@ export function AppProvider({ children }) {
       sub?.data?.subscription?.unsubscribe()
     }
   }, [])
+
+  const refreshProfile = useCallback(async () => {
+    const sessionId = session?.user?.id ?? null;
+    if (!sessionId) return null;
+    try {
+      const { data } = await userAPI.getProfile();
+      const profileData = data?.data?.profile;
+      if (profileData) {
+        setProfile(profileData);
+        let parsedBio = { text: '', location: '', portfolio: '', techStack: [], learningGoals: [] };
+        try {
+          if (profileData.bio && profileData.bio.trim().startsWith('{')) {
+            const json = JSON.parse(profileData.bio);
+            parsedBio.text = json.bio || '';
+            parsedBio.location = json.location || '';
+            parsedBio.portfolio = json.portfolio || '';
+            parsedBio.techStack = Array.isArray(json.techStack) ? json.techStack : [];
+            parsedBio.learningGoals = Array.isArray(json.learningGoals) ? json.learningGoals : [];
+          } else {
+            parsedBio.text = profileData.bio || '';
+          }
+        } catch (e) {
+          parsedBio.text = profileData.bio || '';
+        }
+
+        setState((prev) => ({
+          ...prev,
+          xp: Math.max(prev.xp || 0, profileData.xp || 0),
+          studyPoints: Math.max(prev.studyPoints || 0, profileData.study_points || 0),
+          streak: Math.max(prev.streak || 0, profileData.streak || 0),
+          studyHours: Math.max(prev.studyHours || 0, profileData.study_hours || 0),
+          studyTimeMinutes: Math.max(prev.studyTimeMinutes || 0, profileData.study_time_minutes || 0),
+          lastActiveDate: profileData.last_active_date || prev.lastActiveDate,
+          completedChapters: (profileData.progress && Object.keys(profileData.progress).length > 0)
+            ? { ...prev.completedChapters, ...profileData.progress }
+            : prev.completedChapters,
+          quizScores: (profileData.quiz_scores && Object.keys(profileData.quiz_scores).length > 0)
+            ? { ...prev.quizScores, ...profileData.quiz_scores }
+            : prev.quizScores,
+          profileName: profileData.full_name || prev.profileName,
+          profileBio: parsedBio.text,
+          profileLocation: parsedBio.location,
+          profilePortfolio: parsedBio.portfolio,
+          profileTechStack: parsedBio.techStack,
+          profileLearningGoals: parsedBio.learningGoals,
+          profileAvatar: profileData.avatar_url || prev.profileAvatar,
+          username: profileData.username || prev.username,
+        }));
+        return profileData;
+      }
+    } catch (err) {
+      console.error('Failed to sync db stats:', err);
+    }
+    return null;
+  }, [session]);
 
   /* eslint-disable react-hooks/set-state-in-effect -- localStorage keyed by auth identity; must run before persist effect */
   useLayoutEffect(() => {
@@ -388,6 +493,7 @@ export function AppProvider({ children }) {
 
     if (!loggedIn) {
       setState(loadPersistedLearningState(STORAGE_KEY_LEGACY))
+      setProfile(null)
       return
     }
 
@@ -396,20 +502,20 @@ export function AppProvider({ children }) {
     setState(localState)
 
     if (sessionId) {
-      userAPI.getProfile().then(({ data }) => {
-        if (data && data.stats) {
-          setState((prev) => ({
-            ...prev,
-            xp: Math.max(prev.xp || 0, data.stats.xp || 0),
-            studyPoints: Math.max(prev.studyPoints || 0, data.stats.studyPoints || 0),
-            streak: Math.max(prev.streak || 0, data.stats.streak || 0),
-            completedChapters: Object.keys(data.stats.progress || {}).length > 0 ? { ...prev.completedChapters, ...data.stats.progress } : prev.completedChapters,
-            quizScores: Object.keys(data.stats.quizScores || {}).length > 0 ? { ...prev.quizScores, ...data.stats.quizScores } : prev.quizScores,
-          }))
+      refreshProfile();
+
+      roadmapAPI.getUserRoadmaps().then(({ data }) => {
+        if (data?.success) {
+          setCustomRoadmaps(data.data || [])
         }
-      }).catch(err => console.error('Failed to sync db stats:', err))
+      }).catch(err => {
+        console.warn('Failed to fetch custom roadmaps:', err)
+      })
+    } else {
+      setProfile(null)
+      setCustomRoadmaps([])
     }
-  }, [authReady, session, guestLogin])
+  }, [authReady, session, guestLogin, refreshProfile])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
@@ -441,6 +547,7 @@ export function AppProvider({ children }) {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', state.darkMode)
+    document.documentElement.classList.toggle('light', !state.darkMode)
     document.documentElement.style.fontSize = `${state.fontScale}%`
   }, [state.darkMode, state.fontScale])
 
@@ -455,7 +562,7 @@ export function AppProvider({ children }) {
   // Automatic Stats Sync to Supabase
 
   useEffect(() => {
-    if (!authReady || !session?.user?.id) return
+    if (!authReady || !session?.user?.id || !profile) return
 
     const syncTimeout = setTimeout(async () => {
       try {
@@ -463,6 +570,9 @@ export function AppProvider({ children }) {
           xp: state.xp,
           studyPoints: state.studyPoints,
           streak: state.streak,
+          studyHours: state.studyHours,
+          studyTimeMinutes: state.studyTimeMinutes,
+          lastActiveDate: state.lastActiveDate,
           accuracy: state.assessmentMode.score || 0, // Simplified accuracy mapping
           progress: state.completedChapters,
           quizScores: state.quizScores,
@@ -474,7 +584,26 @@ export function AppProvider({ children }) {
     }, 5000) // Sync 5 seconds after last change to prevent spamming
 
     return () => clearTimeout(syncTimeout)
-  }, [state.xp, state.studyPoints, state.streak, state.completedChapters, state.quizScores, authReady, session])
+  }, [state.xp, state.studyPoints, state.streak, state.completedChapters, state.quizScores, authReady, session, profile])
+
+  // Active Study Time Tracking: Increments studyTimeMinutes every 1 minute of visible activity
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        setState((prev) => {
+          const nextMinutes = (prev.studyTimeMinutes || 0) + 1
+          const nextStudyHours = Math.floor(nextMinutes / 60)
+          return {
+            ...prev,
+            studyTimeMinutes: nextMinutes,
+            studyHours: nextStudyHours,
+          }
+        })
+      }
+    }, 60000)
+
+    return () => clearInterval(interval)
+  }, [])
 
   useEffect(() => {
     if (!state.remindersEnabled || !('Notification' in window) || Notification.permission !== 'granted') {
@@ -513,7 +642,31 @@ export function AppProvider({ children }) {
             next.studyPoints = rewardUpdate.studyPoints
             next.pointsHistory = rewardUpdate.pointsHistory
             next.xp = prev.xp + 20
-            next.streak = prev.streak + 1
+            
+            // Calculate next streak based on local calendar days
+            const todayStr = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
+            let nextStreak = prev.streak
+            if (!prev.lastActiveDate) {
+              nextStreak = 1
+            } else if (prev.lastActiveDate !== todayStr) {
+              const prevDate = new Date(prev.lastActiveDate + 'T00:00:00')
+              const currDate = new Date(todayStr + 'T00:00:00')
+              const diffTime = currDate - prevDate
+              const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24))
+              
+              if (diffDays === 1) {
+                nextStreak = prev.streak + 1
+              } else if (diffDays > 1) {
+                nextStreak = 1
+              }
+            }
+            next.streak = nextStreak
+            next.lastActiveDate = todayStr
+            
+            // Credit actual focus session minutes to active study time
+            next.studyTimeMinutes = (prev.studyTimeMinutes || 0) + focusDurationMinutes
+            next.studyHours = Math.floor(next.studyTimeMinutes / 60)
+            
             changed = true
             setNotice({ type: 'success', message: 'Focus session completed. +10 points and +20 XP.' })
           }
@@ -598,26 +751,71 @@ export function AppProvider({ children }) {
 
   const resolvedUser = useMemo(() => {
     const baseUser = deriveUser(session, guestLogin)
-    return buildDisplayUser({
+    const userObj = buildDisplayUser({
       ...baseUser,
       loggedIn: baseUser.loggedIn && isStateSynced
     }, state)
-  }, [state, session, guestLogin, isStateSynced])
+    if (profile) {
+      userObj.is_premium = profile.is_premium || false
+      userObj.role = profile.role || 'STUDENT'
+    }
+    return userObj
+  }, [state, session, guestLogin, isStateSynced, profile])
 
   const actions = useMemo(
     () => ({
-      async signInWithPassword(email, password) {
-        if (!supabase) return { error: new Error('Supabase is not configured.') }
-        return supabase.auth.signInWithPassword({ email: email.trim(), password })
+      async refreshProfile() {
+        return refreshProfile();
       },
-      async signUp(email, password, fullName) {
-        if (!supabase) return { error: new Error('Supabase is not configured.') }
-        const name = fullName.trim()
-        return supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: { data: name ? { full_name: name } : undefined },
-        })
+      async signIn(email, password) {
+        try {
+          const res = await authAPI.login(email, password)
+          if (res.data?.success && res.data?.data?.session) {
+            const { session } = res.data.data
+            const { error } = await supabase.auth.setSession(session)
+            if (error) throw error
+            return { data: res.data.data }
+          } else {
+            return { error: res.data?.message || 'Login failed' }
+          }
+        } catch (err) {
+          console.error('Sign-in error:', err)
+          return { error: err.response?.data?.message || err.message || 'Login failed' }
+        }
+      },
+      async signUp(signupData) {
+        try {
+          const res = await authAPI.register(signupData)
+          if (res.data?.success) {
+            const signupResult = res.data.data
+            if (signupResult?.session) {
+              const { error } = await supabase.auth.setSession(signupResult.session)
+              if (error) throw error
+            }
+            return { data: signupResult }
+          } else {
+            return { error: res.data?.message || 'Registration failed' }
+          }
+        } catch (err) {
+          console.error('Sign-up error:', err)
+          return { error: err.response?.data?.message || err.message || 'Registration failed' }
+        }
+      },
+      async verifyOTP(email, otp) {
+        try {
+          const res = await authAPI.verify(email, otp)
+          if (res.data?.success && res.data?.data?.session) {
+            const { session } = res.data.data
+            const { error } = await supabase.auth.setSession(session)
+            if (error) throw error
+            return { data: res.data.data }
+          } else {
+            return { error: res.data?.message || 'Verification failed' }
+          }
+        } catch (err) {
+          console.error('Verification error:', err)
+          return { error: err.response?.data?.message || err.message || 'Verification failed' }
+        }
       },
       async resetPassword(email) {
         if (!supabase) return { error: new Error('Supabase is not configured.') }
@@ -656,6 +854,7 @@ export function AppProvider({ children }) {
       async logout() {
         if (supabase) await supabase.auth.signOut()
         setGuestLogin(null)
+        setCustomRoadmaps([])
         persistIdentityRef.current = null
         setState(loadPersistedLearningState(STORAGE_KEY_LEGACY))
       },
@@ -750,6 +949,10 @@ export function AppProvider({ children }) {
           profileEmail: sanitized.email,
           profilePhone: sanitized.phone,
           profileBio: sanitized.bio,
+          profileLocation: sanitized.location || '',
+          profilePortfolio: sanitized.portfolio || '',
+          profileTechStack: sanitized.techStack || [],
+          profileLearningGoals: sanitized.learningGoals || [],
           profileAvatar: sanitized.avatar || prev.profileAvatar,
         }))
 
@@ -799,10 +1002,49 @@ export function AppProvider({ children }) {
         setState((prev) => {
           const key = `${courseId}:${chapterId}`
           if (prev.completedChapters[key]) return prev
+          const nextCompletedChapters = { ...prev.completedChapters, [key]: true }
+          const nextXp = prev.xp + 50 // Award 50 XP per completed chapter
+          
+          // Calculate streak based on local timezone calendar days
+          const todayStr = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
+          let nextStreak = prev.streak
+          if (!prev.lastActiveDate) {
+            nextStreak = 1
+          } else if (prev.lastActiveDate !== todayStr) {
+            const prevDate = new Date(prev.lastActiveDate + 'T00:00:00')
+            const currDate = new Date(todayStr + 'T00:00:00')
+            const diffTime = currDate - prevDate
+            const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24))
+            
+            if (diffDays === 1) {
+              nextStreak = prev.streak + 1
+            } else if (diffDays > 1) {
+              nextStreak = 1
+            }
+          }
+
+          // Immediately persist to backend (non-blocking) after state updates
+          if (authReady && session?.user?.id && profile) {
+            setTimeout(() => {
+              userAPI.syncStats({
+                xp: nextXp,
+                studyPoints: prev.studyPoints,
+                streak: nextStreak,
+                studyHours: prev.studyHours,
+                studyTimeMinutes: prev.studyTimeMinutes,
+                lastActiveDate: todayStr,
+                progress: nextCompletedChapters,
+                quizScores: prev.quizScores,
+              }).catch(err => console.warn('Chapter completion sync failed:', err))
+            }, 0)
+          }
+
           return {
             ...prev,
-            studyHours: prev.studyHours + 1,
-            completedChapters: { ...prev.completedChapters, [key]: true },
+            completedChapters: nextCompletedChapters,
+            xp: nextXp,
+            streak: nextStreak,
+            lastActiveDate: todayStr
           }
         })
       },
@@ -818,12 +1060,28 @@ export function AppProvider({ children }) {
       submitQuiz(courseId, score) {
         setState((prev) => {
           const rewardUpdate = score >= 60 ? applyPointDelta(prev, 5, 'quiz-pass') : null
+          const nextXp = score >= 60 ? prev.xp + 10 : prev.xp
+          const nextQuizScores = { ...prev.quizScores, [courseId]: score }
+          const nextStudyPoints = rewardUpdate ? rewardUpdate.studyPoints : prev.studyPoints
+
+          // Sync quiz result to backend immediately
+          if (authReady && session?.user?.id && profile) {
+            setTimeout(() => {
+              userAPI.syncStats({
+                xp: nextXp,
+                studyPoints: nextStudyPoints,
+                streak: prev.streak,
+                quizScores: nextQuizScores,
+              }).catch(err => console.warn('Quiz sync failed:', err))
+            }, 0)
+          }
+
           return {
             ...prev,
-            quizScores: { ...prev.quizScores, [courseId]: score },
-            studyPoints: rewardUpdate ? rewardUpdate.studyPoints : prev.studyPoints,
+            quizScores: nextQuizScores,
+            studyPoints: nextStudyPoints,
             pointsHistory: rewardUpdate ? rewardUpdate.pointsHistory : prev.pointsHistory,
-            xp: score >= 60 ? prev.xp + 10 : prev.xp,
+            xp: nextXp,
           }
         })
       },
@@ -1010,12 +1268,56 @@ export function AppProvider({ children }) {
           message: t(state.language, 'assessmentQuitPenaltyNotice'),
         })
       },
-      submitAssessment(rawScore) {
+      async submitAssessment(quizId, answers, timeTaken, violations) {
+        try {
+          if (isSupabaseConfigured) {
+            const res = await quizAPI.submitAttempt(quizId, {
+              answers,
+              time_taken_seconds: timeTaken,
+              violations,
+            })
+            if (res.data?.success) {
+              const { score, passed } = res.data.data
+              setState((prev) => {
+                const net = Math.max(0, score - prev.assessmentMode.deductions)
+                const rewardUpdate = passed ? applyPointDelta(prev, 5, 'assessment-pass') : null
+                return {
+                  ...prev,
+                  quizScores: { ...prev.quizScores, [quizId]: net },
+                  assessmentMode: {
+                    ...prev.assessmentMode,
+                    active: false,
+                    score: net,
+                    submitted: true,
+                    timerEndsAt: null,
+                  },
+                  xp: passed ? prev.xp + (res.data.data.attempt?.xp_reward || 100) : prev.xp,
+                  studyPoints: rewardUpdate ? rewardUpdate.studyPoints : prev.studyPoints,
+                  pointsHistory: rewardUpdate ? rewardUpdate.pointsHistory : prev.pointsHistory,
+                }
+              })
+              return { success: true, score }
+            }
+          }
+        } catch (err) {
+          console.error('Failed to submit assessment to backend:', err)
+        }
+
+        // Local fallback calculation for guest mode
+        const questions = courseQuizzes[quizId] || []
+        let correctCount = 0
+        questions.forEach((q, idx) => {
+          if (answers[idx] === q.answer) correctCount++
+        })
+        const calculatedScore = questions.length > 0 ? Math.round((correctCount / questions.length) * 100) : 0
+
         setState((prev) => {
-          const net = Math.max(0, Number(rawScore || 0) - prev.assessmentMode.deductions)
-          const rewardUpdate = net >= 60 ? applyPointDelta(prev, 5, 'assessment-pass') : null
+          const net = Math.max(0, calculatedScore - prev.assessmentMode.deductions)
+          const passed = net >= 60
+          const rewardUpdate = passed ? applyPointDelta(prev, 5, 'assessment-pass') : null
           return {
             ...prev,
+            quizScores: { ...prev.quizScores, [quizId]: net },
             assessmentMode: {
               ...prev.assessmentMode,
               active: false,
@@ -1023,7 +1325,7 @@ export function AppProvider({ children }) {
               submitted: true,
               timerEndsAt: null,
             },
-            xp: prev.xp + Math.round(net / 5),
+            xp: passed ? prev.xp + 10 : prev.xp,
             studyPoints: rewardUpdate ? rewardUpdate.studyPoints : prev.studyPoints,
             pointsHistory: rewardUpdate ? rewardUpdate.pointsHistory : prev.pointsHistory,
           }
@@ -1055,6 +1357,31 @@ export function AppProvider({ children }) {
       },
       claimDailyChallenge() {
         setState((prev) => ({ ...prev, streak: prev.streak + 1 }))
+      },
+      async convertXPToRP(amount) {
+        try {
+          if (state.xp < amount) {
+            return { success: false, error: 'Insufficient XP' }
+          }
+          
+          if (isSupabaseConfigured && session?.user?.id) {
+            const res = await userAPI.convertXP(amount)
+            if (!res.data?.success) {
+              throw new Error(res.data?.message || 'Conversion failed')
+            }
+          }
+
+          setState((prev) => ({
+            ...prev,
+            xp: Math.max(0, prev.xp - amount),
+            studyPoints: prev.studyPoints + (amount / 100)
+          }))
+
+          return { success: true }
+        } catch (err) {
+          console.error('Failed to convert XP:', err)
+          return { success: false, error: err.message || 'Conversion failed' }
+        }
       },
       setRemindersEnabled(enabled) {
         setState((prev) => ({ ...prev, remindersEnabled: Boolean(enabled) }))
@@ -1097,12 +1424,59 @@ export function AppProvider({ children }) {
       clearNotice() {
         setNotice(null)
       },
+      async fetchCustomRoadmaps() {
+        try {
+          if (!session?.user?.id) return
+          const { data } = await roadmapAPI.getUserRoadmaps()
+          if (data?.success) {
+            setCustomRoadmaps(data.data || [])
+          }
+        } catch (err) {
+          console.error('Failed to fetch custom roadmaps:', err)
+        }
+      },
+      async createCustomRoadmap(roadmap) {
+        try {
+          const { data } = await roadmapAPI.createUserRoadmap(roadmap)
+          if (data?.success) {
+            setCustomRoadmaps(prev => [...prev, data.data])
+            return { success: true, data: data.data }
+          }
+          return { success: false, error: 'Failed to create roadmap' }
+        } catch (err) {
+          console.error('Failed to create custom roadmap:', err)
+          return { success: false, error: err.response?.data?.message || err.message }
+        }
+      },
+      async updateCustomRoadmap(id, roadmap) {
+        try {
+          const { data } = await roadmapAPI.updateUserRoadmap(id, roadmap)
+          if (data?.success) {
+            setCustomRoadmaps(prev => prev.map(r => r.id === id ? data.data : r))
+            return { success: true, data: data.data }
+          }
+          return { success: false, error: 'Failed to update roadmap' }
+        } catch (err) {
+          console.error('Failed to update custom roadmap:', err)
+          return { success: false, error: err.response?.data?.message || err.message }
+        }
+      },
+      async deleteCustomRoadmap(id) {
+        try {
+          const { data } = await roadmapAPI.deleteUserRoadmap(id)
+          if (data?.success) {
+            setCustomRoadmaps(prev => prev.filter(r => r.id !== id))
+            return { success: true }
+          }
+          return { success: false, error: 'Failed to delete roadmap' }
+        } catch (err) {
+          console.error('Failed to delete custom roadmap:', err)
+          return { success: false, error: err.response?.data?.message || err.message }
+        }
+      },
     }),
-    [resolvedUser, session, state.focusDurationMinutes, state.language, state.username],
+    [resolvedUser, session, state.focusDurationMinutes, state.language, state.username, courseQuizzes, state.xp, refreshProfile],
   )
-
-  const courses = useMemo(() => contentReady ? getCourses() : [], [contentReady])
-  const courseQuizzes = useMemo(() => contentReady ? getCourseQuizzes() : {}, [contentReady])
 
   const totalChapters = courses.reduce((sum, course) => sum + course.chapters.length, 0) || 1
   const completedChapterCount = Object.keys(state.completedChapters).length
@@ -1129,6 +1503,17 @@ export function AppProvider({ children }) {
         stats: { totalChapters, completedChapterCount, skillPercentage, quizAverage },
         metadata: { categories, courses, courseQuizzes, projectsByLevel, learningLevels },
         notice,
+        dbError,
+        assessmentMode: {
+          isActive: displayState.assessmentMode?.active || false,
+          timerRemaining: displayState.assessmentMode?.timerRemaining || 0,
+          violations: displayState.assessmentMode?.violations || 0,
+          deductions: displayState.assessmentMode?.deductions || 0,
+        },
+        user: displayState.user.loggedIn ? displayState.user : null,
+        profile,
+        customRoadmaps,
+        loading: !authReady || !contentReady
       }}
     >
       {children}

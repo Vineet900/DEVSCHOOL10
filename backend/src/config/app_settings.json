@@ -1,0 +1,9 @@
+{
+  "siteName": "DevSchool Pro",
+  "maintenanceMode": false,
+  "registrationEnabled": true,
+  "emailNotifications": true,
+  "supportEmail": "support@devschool.com",
+  "aiTutorModel": "gemini-3.5-flash",
+  "geminiApiKey": "AIzaSyDbSXxQWsCPrLiQYKAggD_Mvov30osPgbw"
+}

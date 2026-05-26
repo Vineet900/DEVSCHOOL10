@@ -29,6 +29,12 @@ apiClient.interceptors.request.use(
           config.headers.Authorization = `Bearer ${token}`
         }
       }
+
+      // Automatically append X-Custom-Api-Key if defined in localStorage for AI endpoints
+      const customKey = localStorage.getItem('devschoolpro-custom-gemini-key')
+      if (customKey) {
+        config.headers['X-Custom-Api-Key'] = customKey
+      }
     } catch (error) {
       console.warn('Failed to get auth token:', error)
     }
@@ -45,103 +51,135 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token expired or invalid
-      console.warn('Unauthorized request')
+      console.warn('Unauthorized request - session may be expired')
     }
     return Promise.reject(error)
   },
 )
 
 /**
- * User API endpoints
+ * Auth API — maps to backend /api/v1/auth/*
+ * Backward compat alias /api/auth/* also works
+ */
+export const authAPI = {
+  login: (email, password) => apiClient.post('/auth/login', { email, password }),
+  register: (data) => apiClient.post('/auth/register', data),
+  verify: (email, otp) => apiClient.post('/auth/verify', { email, otp, type: 'email' }),
+  logout: () => apiClient.post('/auth/logout'),
+  refresh: (refreshToken) => apiClient.post('/auth/refresh', { refreshToken }),
+  google: (idToken) => apiClient.post('/auth/google', { idToken }),
+}
+
+/**
+ * User API — maps to backend /api/v1/users/*
+ * Backward compat alias /api/user/* also works
  */
 export const userAPI = {
-  /**
-   * Get current authenticated user profile
-   */
-  async getProfile() {
-    try {
-      const { data } = await apiClient.get('/user/me')
-      return { data, error: null }
-    } catch (error) {
-      return { data: null, error: error.response?.data || error.message }
-    }
-  },
+  getProfile: () => apiClient.get('/auth/me'),
+  updateProfile: (updates) => apiClient.put('/auth/profile', updates),
+  syncStats: (stats) => apiClient.post('/user/sync-stats', stats),
+  convertXP: () => apiClient.post('/v1/users/convert-xp'),
+  getLeaderboard: (page = 1, limit = 20) => apiClient.get(`/v1/users/leaderboard?page=${page}&limit=${limit}`),
+}
 
-  /**
-   * Update current user profile
-   */
-  async updateProfile(updates) {
-    try {
-      const { data } = await apiClient.put('/user/update', updates)
-      return { data, error: null }
-    } catch (error) {
-      return { data: null, error: error.response?.data || error.message }
-    }
-  },
+/**
+ * Course & Learning API — maps to backend /api/v1/courses/*
+ * Backward compat alias /api/courses/* also works
+ */
+export const courseAPI = {
+  getCourses: () => apiClient.get('/courses'),
+  getCourse: (id) => apiClient.get(`/courses/${id}`),
+  getLesson: (lessonId) => apiClient.get(`/v1/courses/lessons/${lessonId}`),
+  getLessonsBySection: (courseId, sectionId) => apiClient.get(`/v1/courses/${courseId}/sections/${sectionId}/lessons`),
+  enroll: (courseId) => apiClient.post('/v1/courses/enroll', { courseId }),
+  getEnrolled: () => apiClient.get('/v1/courses/enrolled/me'),
+}
 
-  /**
-   * Change user password
-   */
-  async changePassword(currentPassword, newPassword) {
-    try {
-      const { data } = await apiClient.post('/auth/change-password', {
-        current_password: currentPassword,
-        new_password: newPassword,
-      })
-      return { data, error: null }
-    } catch (error) {
-      return { data: null, error: error.response?.data || error.message }
-    }
-  },
+/**
+ * Progress API — maps to backend /api/v1/progress/*
+ */
+export const progressAPI = {
+  getAll: () => apiClient.get('/v1/progress'),
+  getCourseProgress: (courseId) => apiClient.get(`/v1/progress/course/${courseId}`),
+  updateProgress: (lessonId, isCompleted = true) => apiClient.post('/v1/progress', { lessonId, isCompleted }),
+}
 
-  /**
-   * Get user sessions
-   */
-  async getSessions() {
-    try {
-      const { data } = await apiClient.get('/auth/sessions')
-      return { data, error: null }
-    } catch (error) {
-      return { data: null, error: error.response?.data || error.message }
-    }
-  },
+/**
+ * Quiz API — maps to backend /api/v1/quizzes/*
+ */
+export const quizAPI = {
+  getQuiz: (quizId) => apiClient.get(`/v1/quizzes/${quizId}`),
+  submitAttempt: (quizId, answers) => apiClient.post(`/v1/quizzes/${quizId}/submit`, { answers }),
+  getResults: (quizId) => apiClient.get(`/v1/quizzes/${quizId}/results`),
+}
 
-  /**
-   * Logout from all sessions
-   */
-  async logoutAll() {
-    try {
-      const { data } = await apiClient.post('/auth/logout-all')
-      return { data, error: null }
-    } catch (error) {
-      return { data: null, error: error.response?.data || error.message }
-    }
-  },
+/**
+ * AI Teacher API — maps to backend /api/v1/ai/*
+ */
+export const teacherAPI = {
+  ask: (payload) => apiClient.post('/v1/ai/chat', payload),
+  generateQuiz: (payload) => apiClient.post('/v1/ai/generate-quiz', payload),
+  generateRoadmap: (payload) => apiClient.post('/v1/ai/generate-roadmap', payload),
+  getTokens: () => apiClient.get('/v1/ai/tokens'),
+  enhanceLesson: (lessonId) => apiClient.post('/v1/ai/enhance-lesson', { lessonId }),
+}
 
-  /**
-   * Delete user account
-   */
-  async deleteAccount() {
-    try {
-      const { data } = await apiClient.delete('/user/delete')
-      return { data, error: null }
-    } catch (error) {
-      return { data: null, error: error.response?.data || error.message }
-    }
-  },
+// Legacy alias for tutorAPI
+export const tutorAPI = teacherAPI
 
-  /**
-   * Sync user learning stats (XP, Points, Streak, Progress)
-   */
-  async syncStats(stats) {
-    try {
-      const { data } = await apiClient.post('/user/sync-stats', stats)
-      return { data, error: null }
-    } catch (error) {
-      return { data: null, error: error.response?.data || error.message }
-    }
-  },
+/**
+ * Certificate API — maps to backend /api/v1/certificates/*
+ */
+export const certificateAPI = {
+  generate: (courseId) => apiClient.post(`/v1/certificates/generate/${courseId}`),
+  verify: (code) => apiClient.get(`/v1/certificates/verify/${code}`),
+}
+
+/**
+ * Upload API — maps to backend /api/v1/uploads/*
+ */
+export const uploadAPI = {
+  uploadAvatar: (formData) => apiClient.post('/v1/uploads/avatar', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+}
+
+/**
+ * Roadmap API
+ */
+export const roadmapAPI = {
+  getUserRoadmaps: () => Promise.resolve({ data: { success: true, data: [] } }),
+  createUserRoadmap: (roadmap) => apiClient.post('/v1/ai/generate-roadmap', roadmap),
+  deleteUserRoadmap: (id) => apiClient.delete(`/v1/roadmaps/${id}`),
+}
+
+/**
+ * Admin API — maps to backend /api/v1/admin/*
+ */
+export const adminAPI = {
+  getDashboard: () => apiClient.get('/v1/admin/dashboard'),
+  getUsers: (page = 1, limit = 20) => apiClient.get(`/v1/admin/users?page=${page}&limit=${limit}`),
+  updateUser: (id, data) => apiClient.put(`/v1/admin/users/${id}`, data),
+  banUser: (id, banned) => apiClient.put(`/v1/admin/users/${id}/ban`, { banned }),
+  refillTokens: (id, amount) => apiClient.post(`/v1/admin/users/${id}/refill-tokens`, { amount }),
+  getCourses: (page = 1) => apiClient.get(`/v1/admin/courses?page=${page}`),
+  createCourse: (data) => apiClient.post('/v1/admin/courses', data),
+  updateCourse: (id, data) => apiClient.put(`/v1/admin/courses/${id}`, data),
+  deleteCourse: (id) => apiClient.delete(`/v1/admin/courses/${id}`),
+  getSettings: () => apiClient.get('/v1/admin/settings'),
+  updateSettings: (settings) => apiClient.put('/v1/admin/settings', { settings }),
+  sendNotification: (data) => apiClient.post('/v1/admin/notifications', data),
+  getRedeems: () => apiClient.get('/v1/admin/redeems'),
+  updateRedeem: (id, status) => apiClient.put(`/v1/admin/redeems/${id}`, { status }),
+  getModeration: () => apiClient.get('/v1/admin/moderation'),
+  resolveReport: (id, status) => apiClient.put(`/v1/admin/moderation/${id}`, { status }),
+  getLogs: (page = 1) => apiClient.get(`/v1/admin/logs?page=${page}`),
+  getStats: () => apiClient.get('/v1/admin/dashboard'),
+  getHealth: () => apiClient.get('/v1/admin/health'),
+  getAllUsers: () => apiClient.get('/v1/admin/users?page=1&limit=1000'),
+  getAuditLogs: (page = 1) => apiClient.get(`/v1/admin/logs?page=${page}`),
+  manageUser: (id, data) => apiClient.put(`/v1/admin/users/${id}`, data),
+  adjustPoints: (userId, amount, reason) => apiClient.post(`/v1/admin/users/${userId}/refill-tokens`, { amount }),
 }
 
 export default apiClient

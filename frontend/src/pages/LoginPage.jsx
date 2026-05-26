@@ -1,445 +1,337 @@
-import { useState } from 'react'
-import AppLogo from '../components/AppLogo'
+import { useState, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { 
+  Mail, 
+  Lock, 
+  User, 
+  ShieldCheck, 
+  ArrowRight, 
+  ChevronLeft,
+  Sparkles,
+  Fingerprint,
+  Smartphone,
+  Eye,
+  EyeOff,
+  MessageSquare,
+  Code
+} from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import { t } from '../data/i18n'
-import { isSupabaseConfigured } from '../lib/supabase'
+import { toast } from 'react-hot-toast'
+import AuthLayout from '../components/auth/AuthLayout'
+import { AuthInput, AuthButton } from '../components/auth/AuthComponents'
+import OTPInput from '../components/auth/OTPInput'
 
 export default function LoginPage() {
-  const { state, actions } = useApp()
-  const language = state.language
-  const [method, setMethod] = useState('email')
-  const [tab, setTab] = useState('signIn')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [displayName, setDisplayName] = useState('')
-  const [guestName, setGuestName] = useState('')
-  const [countryCode, setCountryCode] = useState('+91')
-  const [phone, setPhone] = useState('')
-  const [phoneOtp, setPhoneOtp] = useState('')
-  const [phoneStep, setPhoneStep] = useState('enterPhone')
+  const { actions } = useApp()
+  const [tab, setTab] = useState('signIn') // 'signIn' or 'signUp'
+  const [loginMethod, setLoginMethod] = useState('password') // 'password' or 'otp'
+  const [step, setStep] = useState('info') // 'info' or 'verify'
+  const [showPassword, setShowPassword] = useState(false)
+  
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+    username: '',
+    name: '',
+    phone: '',
+    otp: ''
+  })
+  
   const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState(null)
   const [error, setError] = useState(null)
 
-  const clearFeedback = () => {
+  const handleInputChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value })
     setError(null)
-    setMessage(null)
   }
 
-  const switchMethod = (next) => {
-    setMethod(next)
-    clearFeedback()
-    setPhoneStep('enterPhone')
-    setPhoneOtp('')
-  }
+  const onSignIn = async (e) => {
+    e.preventDefault()
+    if (!formData.email || (loginMethod === 'password' && !formData.password)) {
+      setError('Please fill in all required fields')
+      return
+    }
 
-  const switchTab = (next) => {
-    setTab(next)
-    clearFeedback()
-    setPhoneStep('enterPhone')
-    setPhoneOtp('')
-  }
-
-  const onSignIn = async (event) => {
-    event.preventDefault()
-    if (!isSupabaseConfigured) return
-    clearFeedback()
     setLoading(true)
-    const { error: err } = await actions.signInWithPassword(email, password)
-    setLoading(false)
-    if (err) setError(err.message)
+    setError(null)
+
+    try {
+      if (loginMethod === 'password') {
+        const res = await actions.signIn(formData.email, formData.password)
+        if (res.error) setError(res.error)
+        else toast.success('Access Granted. Welcome back, Agent.')
+      } else {
+        // OTP Login Logic (Magic Link or similar)
+        toast.success('Synchronization code dispatched.')
+        setStep('verify')
+      }
+    } catch (err) {
+      setError('Neural link failure. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const onSignUp = async (event) => {
-    event.preventDefault()
-    if (!isSupabaseConfigured) return
-    clearFeedback()
+  const onSignUp = async (e) => {
+    e.preventDefault()
+    if (!formData.email || !formData.password || !formData.username) {
+      setError('Registration requires email, password, and username')
+      return
+    }
+
     setLoading(true)
-    const { data, error: err } = await actions.signUp(email, password, displayName)
+    setError(null)
+    const res = await actions.signUp(formData)
+    if (res.error) setError(res.error)
+    else {
+      if (res.data?.session) {
+        toast.success('Identity established. Welcome back, Agent.')
+      } else {
+        toast.success('Identity established. Verification required.')
+        setStep('verify')
+      }
+    }
     setLoading(false)
-    if (err) {
-      setError(err.message)
-      return
-    }
-    if (data.session) {
-      setMessage(t(language, 'welcomeSignedIn'))
-    } else {
-      setMessage(t(language, 'checkEmailConfirm'))
-    }
   }
 
-  const onGuestContinue = (event) => {
-    event.preventDefault()
-    clearFeedback()
-    actions.guestLogin(guestName)
-  }
+  const onVerify = async (e) => {
+    e?.preventDefault()
+    if (formData.otp.length < 6) return
 
-  const onForgotPassword = async () => {
-    if (!isSupabaseConfigured) return
-    clearFeedback()
-    if (!email.trim()) {
-      setError(t(language, 'enterEmailFirst'))
-      return
-    }
     setLoading(true)
-    const { error: err } = await actions.resetPassword(email)
-    setLoading(false)
-    if (err) {
-      setError(err.message)
-      return
+    setError(null)
+    const res = await actions.verifyOTP(formData.email, formData.otp)
+    if (res.error) setError(res.error)
+    else {
+      toast.success('Clearance granted. Identity verified.')
+      // Redirect happens via App.jsx
     }
-    setMessage(t(language, 'resetLinkSent'))
+    setLoading(false)
   }
 
-  const onGoogle = async () => {
-    if (!isSupabaseConfigured) return
-    clearFeedback()
-    setLoading(true)
-    const { data, error: err } = await actions.signInWithGoogle()
-    setLoading(false)
-    if (err) {
-      setError(err.message)
-      return
+  // Handle Enter key for OTP
+  useEffect(() => {
+    if (step === 'verify' && formData.otp.length === 6) {
+      onVerify()
     }
-    if (data?.url) {
-      window.location.assign(data.url)
-    }
-  }
-
-  const onSendPhoneCode = async (event) => {
-    event.preventDefault()
-    if (!isSupabaseConfigured) return
-    clearFeedback()
-    const rawPhone = phone.trim().replace(/^\+/, '')
-    const normalized = rawPhone.startsWith(countryCode.replace('+', '')) 
-      ? `+${rawPhone}` 
-      : `${countryCode}${rawPhone}`
-    
-    if (normalized.length < 10) {
-      setError(t(language, 'phoneE164Hint'))
-      return
-    }
-    setLoading(true)
-    const fullName = tab === 'signUp' ? displayName : ''
-    const { error: err } = await actions.sendPhoneOtp(normalized, { fullName })
-    setLoading(false)
-    if (err) {
-      setError(err.message)
-      return
-    }
-    setPhoneStep('verifyOtp')
-    setMessage(t(language, 'smsCodeSent'))
-  }
-
-  const onVerifyPhoneOtp = async (event) => {
-    event.preventDefault()
-    if (!isSupabaseConfigured) return
-    clearFeedback()
-    const rawPhone = phone.trim().replace(/^\+/, '')
-    const normalized = rawPhone.startsWith(countryCode.replace('+', '')) 
-      ? `+${rawPhone}` 
-      : `${countryCode}${rawPhone}`
-    const code = phoneOtp.trim()
-    if (code.length < 4) {
-      setError(t(language, 'enterOtp'))
-      return
-    }
-    setLoading(true)
-    const { error: err } = await actions.verifyPhoneOtp(normalized, code)
-    setLoading(false)
-    if (err) {
-      setError(err.message)
-      return
-    }
-    setMessage(t(language, 'welcomeSignedIn'))
-  }
+  }, [formData.otp, step])
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 dark:bg-slate-900">
-      <div className="w-full max-w-sm space-y-8">
-        <div className="rounded-2xl bg-white p-6 shadow-sm dark:bg-slate-800">
-          <div className="mb-6 flex items-center gap-3">
-            <AppLogo size={36} />
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">DevSchool Pro</h1>
-              <p className="text-sm text-slate-600 dark:text-slate-300">{t(language, 'loginSync')}</p>
-            </div>
-          </div>
-
-          {!isSupabaseConfigured ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
-              {t(language, 'supabaseOptionalA')}{' '}
-              <a href="https://supabase.com/dashboard/project/_/settings/api" className="font-semibold underline">
-                {t(language, 'supabaseApiSettings')}
-              </a>{' '}
-              {t(language, 'supabaseOptionalB')}
-            </div>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={onGoogle}
-                disabled={loading}
-                className="interactive-chip flex w-full items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white px-4 py-3 text-base font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
-              >
-                <GoogleGlyph />
-                {loading ? t(language, 'pleaseWait') : t(language, 'continueWithGoogle')}
-              </button>
-
-              <div className="relative my-5">
-                <div className="absolute inset-0 flex items-center" aria-hidden>
-                  <div className="w-full border-t border-slate-200 dark:border-slate-700" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase tracking-wide">
-                  <span className="bg-white px-2 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                    {t(language, 'orContinueWith')}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
-                <TabButton active={method === 'email'} onClick={() => switchMethod('email')}>
-                  {t(language, 'email')}
-                </TabButton>
-                <TabButton active={method === 'phone'} onClick={() => switchMethod('phone')}>
-                  {t(language, 'phone')}
-                </TabButton>
-              </div>
-
-              <div className="mt-4 flex rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
-                <TabButton active={tab === 'signIn'} onClick={() => switchTab('signIn')}>
-                  {t(language, 'signIn')}
-                </TabButton>
-                <TabButton active={tab === 'signUp'} onClick={() => switchTab('signUp')}>
-                  {t(language, 'signUp')}
-                </TabButton>
-              </div>
-
-              {method === 'email' ? (
-                <form className="mt-5 space-y-4" onSubmit={tab === 'signIn' ? onSignIn : onSignUp}>
-                  {tab === 'signUp' ? (
-                    <Field
-                      label={t(language, 'displayName')}
-                      type="text"
-                      autoComplete="name"
-                      value={displayName}
-                      onChange={(e) => setDisplayName(e.target.value)}
-                      placeholder={t(language, 'greetLabel')}
-                    />
-                  ) : null}
-                  <Field
-                    label={t(language, 'email')}
-                    type="email"
-                    autoComplete={tab === 'signIn' ? 'email' : 'username'}
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                  />
-                  <Field
-                    label={t(language, 'password')}
-                    type="password"
-                    autoComplete={tab === 'signIn' ? 'current-password' : 'new-password'}
-                    required
-                    minLength={6}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder={t(language, 'minChars')}
-                  />
-                  {tab === 'signIn' ? (
-                    <button
-                      type="button"
-                      onClick={onForgotPassword}
-                      disabled={loading}
-                      className="interactive-chip rounded-lg border border-transparent px-2 py-1 text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-60"
-                    >
-                      {t(language, 'forgotPassword')}
-                    </button>
-                  ) : null}
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="interactive-strong w-full rounded-xl bg-blue-600 px-4 py-3 text-base font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                  >
-                    {loading ? t(language, 'pleaseWait') : tab === 'signIn' ? t(language, 'signIn') : t(language, 'createAccount')}
-                  </button>
-                </form>
-              ) : phoneStep === 'enterPhone' ? (
-                <form className="mt-5 space-y-4" onSubmit={onSendPhoneCode}>
-                  {tab === 'signUp' ? (
-                    <Field
-                      label={t(language, 'displayName')}
-                      type="text"
-                      autoComplete="name"
-                      value={displayName}
-                      onChange={(e) => setDisplayName(e.target.value)}
-                      placeholder={t(language, 'greetLabel')}
-                    />
-                  ) : null}
-                  <div className="block">
-                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t(language, 'phoneNumber')}</span>
-                    <div className="mt-2 flex gap-2">
-                      <select 
-                        value={countryCode} 
-                        onChange={e => setCountryCode(e.target.value)}
-                        className="w-[110px] rounded-xl border border-slate-300 px-3 py-3 text-base outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900"
-                      >
-                        <option value="+91">🇮🇳 +91</option>
-                        <option value="+1">🇺🇸 +1</option>
-                        <option value="+44">🇬🇧 +44</option>
-                        <option value="+61">🇦🇺 +61</option>
-                        <option value="+81">🇯🇵 +81</option>
-                        <option value="+971">🇦🇪 +971</option>
-                      </select>
-                      <input
-                        type="tel"
-                        autoComplete="tel"
-                        required
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        placeholder="9876543210"
-                        className="w-full rounded-xl border border-slate-300 px-4 py-3 text-base outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900"
-                      />
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{t(language, 'phoneE164Hint')}</p>
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="interactive-strong w-full rounded-xl bg-blue-600 px-4 py-3 text-base font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                  >
-                    {loading ? t(language, 'pleaseWait') : t(language, 'sendSmsCode')}
-                  </button>
-                </form>
-              ) : (
-                <form className="mt-5 space-y-4" onSubmit={onVerifyPhoneOtp}>
-                  <p className="text-sm text-slate-600 dark:text-slate-300">
-                    {t(language, 'smsSentTo')} <span className="font-medium text-slate-900 dark:text-white">
-                      {phone.trim().startsWith(countryCode.replace('+', '')) ? `+${phone.trim().replace(/^\+/, '')}` : `${countryCode}${phone.trim().replace(/^\+/, '')}`}
-                    </span>
-                  </p>
-                  <Field
-                    label={t(language, 'smsCode')}
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    required
-                    value={phoneOtp}
-                    onChange={(e) => setPhoneOtp(e.target.value)}
-                    placeholder="123456"
-                    maxLength={10}
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      disabled={loading}
-                      onClick={() => {
-                        clearFeedback()
-                        setPhoneStep('enterPhone')
-                        setPhoneOtp('')
-                      }}
-                      className="interactive-chip flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:text-white dark:hover:bg-slate-800"
-                    >
-                      {t(language, 'changeNumber')}
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="interactive-strong flex-1 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                    >
-                      {loading ? t(language, 'pleaseWait') : t(language, 'verifyAndContinue')}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </>
-          )}
-
-          {error ? (
-            <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-300">
-              {error}
-            </p>
-          ) : null}
-          {message ? (
-            <p className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700 dark:bg-green-950/40 dark:text-green-300">
-              {message}
-            </p>
-          ) : null}
+    <AuthLayout>
+      <div className="w-full">
+        {/* TAB SWITCHER */}
+        <div className="flex p-1 bg-white/5 rounded-2xl mb-10 border border-white/5">
+          <button 
+            onClick={() => { setTab('signIn'); setStep('info'); }} 
+            className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${tab === 'signIn' ? 'bg-brand-cyan text-bg-deep shadow-lg shadow-brand-cyan/20' : 'text-slate-500 dark:text-white/40'}`}
+          >
+            Sign In
+          </button>
+          <button 
+            onClick={() => { setTab('signUp'); setStep('info'); }} 
+            className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${tab === 'signUp' ? 'bg-brand-purple text-white shadow-lg shadow-brand-purple/20' : 'text-slate-500 dark:text-white/40'}`}
+          >
+            Join Orbit
+          </button>
         </div>
 
-        {!isSupabaseConfigured ? (
-          <form
-            onSubmit={onGuestContinue}
-            className="rounded-2xl border border-dashed border-slate-300 bg-white/80 p-6 dark:border-slate-600 dark:bg-slate-800/80"
-          >
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{t(language, 'continueOffline')}</h2>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{t(language, 'practiceWithoutAccount')}</p>
-            <label className="mt-4 block text-sm font-medium">{t(language, 'yourName')}</label>
-            <input
-              value={guestName}
-              onChange={(e) => setGuestName(e.target.value)}
-              placeholder={t(language, 'learner')}
-              className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-base outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900"
-            />
-            <button
-              type="submit"
-              className="interactive-strong mt-4 w-full rounded-xl bg-slate-800 px-4 py-3 text-base font-semibold text-white hover:bg-slate-900 dark:bg-blue-900 dark:hover:bg-blue-950"
+        <AnimatePresence mode="wait">
+          {step === 'info' ? (
+            <motion.div 
+              key={`${tab}-info`}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
             >
-              {t(language, 'startLearning')}
-            </button>
-          </form>
-        ) : null}
+              <div className="mb-8">
+                <h2 className="text-3xl font-black text-slate-900 dark:text-white mb-2">
+                  {tab === 'signIn' ? 'Welcome Back' : 'Establish Identity'}
+                </h2>
+                <p className="text-white/40 text-sm">
+                  {tab === 'signIn' ? 'Secure neural uplink initialized.' : 'Register your credentials in the ecosystem.'}
+                </p>
+              </div>
+
+              {/* LOGIN METHOD TOGGLE (Only for SignIn) */}
+              {tab === 'signIn' && (
+                <div className="flex gap-4 mb-6">
+                  <button 
+                    onClick={() => setLoginMethod('password')}
+                    className={`text-[10px] font-bold uppercase tracking-widest pb-1 border-b-2 transition-all ${loginMethod === 'password' ? 'border-brand-cyan text-brand-cyan' : 'border-transparent text-white/20'}`}
+                  >
+                    Master Key
+                  </button>
+                  <button 
+                    onClick={() => setLoginMethod('otp')}
+                    className={`text-[10px] font-bold uppercase tracking-widest pb-1 border-b-2 transition-all ${loginMethod === 'otp' ? 'border-brand-cyan text-brand-cyan' : 'border-transparent text-white/20'}`}
+                  >
+                    One-Time Link
+                  </button>
+                </div>
+              )}
+
+              <form onSubmit={tab === 'signIn' ? onSignIn : onSignUp} className="space-y-5">
+                {tab === 'signUp' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <AuthInput 
+                      label="Username" 
+                      name="username" 
+                      placeholder="agent_zero" 
+                      icon={<User size={18} />} 
+                      value={formData.username} 
+                      onChange={handleInputChange} 
+                    />
+                    <AuthInput 
+                      label="Full Name" 
+                      name="name" 
+                      placeholder="John Wick" 
+                      icon={<Fingerprint size={18} />} 
+                      value={formData.name} 
+                      onChange={handleInputChange} 
+                    />
+                  </div>
+                )}
+
+                <AuthInput 
+                  label="Email Address" 
+                  name="email" 
+                  type="email" 
+                  placeholder="agent@devschool.pro" 
+                  icon={<Mail size={18} />} 
+                  value={formData.email} 
+                  onChange={handleInputChange} 
+                />
+
+                {tab === 'signUp' && (
+                  <AuthInput 
+                    label="Phone (Optional)" 
+                    name="phone" 
+                    placeholder="+1 555 0000" 
+                    icon={<Smartphone size={18} />} 
+                    value={formData.phone} 
+                    onChange={handleInputChange} 
+                  />
+                )}
+
+                {loginMethod === 'password' && (
+                  <div className="relative">
+                    <AuthInput 
+                      label="Master Password" 
+                      name="password" 
+                      type={showPassword ? "text" : "password"} 
+                      placeholder="••••••••" 
+                      icon={<Lock size={18} />} 
+                      value={formData.password} 
+                      onChange={handleInputChange} 
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-5 top-[38px] text-white/20 hover:text-white transition-colors"
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between px-1">
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <input type="checkbox" className="w-4 h-4 rounded border-white/10 bg-white/5 text-brand-cyan focus:ring-brand-cyan/20 transition-all" />
+                    <span className="text-[10px] font-bold text-white/30 group-hover:text-white/50 uppercase tracking-widest transition-colors">Remember Session</span>
+                  </label>
+                  <button type="button" className="text-[10px] font-bold text-brand-cyan hover:text-brand-purple uppercase tracking-widest transition-colors">Recover Key?</button>
+                </div>
+
+                {error && (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold flex items-center gap-3"
+                  >
+                    <ShieldCheck size={16} /> {error}
+                  </motion.div>
+                )}
+
+                <AuthButton loading={loading} variant={tab === 'signIn' ? 'primary' : 'secondary'}>
+                  {tab === 'signIn' ? 'Initiate Session' : 'Establish Identity'}
+                  {!loading && <ArrowRight size={18} />}
+                </AuthButton>
+              </form>
+
+              {/* SOCIAL LOGINS */}
+              <div className="pt-6">
+                <div className="relative mb-8">
+                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/5"></div></div>
+                  <div className="relative flex justify-center text-[10px] font-bold uppercase tracking-widest text-white/20"><span className="bg-bg-page px-4">Secure Neural Links</span></div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <SocialButton onClick={() => actions.signInWithGoogle()} icon={<svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" /><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" /><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" /><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" /></svg>} />
+                  <SocialButton 
+                    onClick={() => {}} 
+                    icon={
+                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.43.372.823 1.102.823 2.222 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+                      </svg>
+                    } 
+                  />
+                  <SocialButton onClick={() => {}} icon={<MessageSquare size={20} />} />
+                </div>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div 
+              key="verify"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-8"
+            >
+              <div className="text-center">
+                <div className="w-20 h-20 rounded-full bg-brand-cyan/10 flex items-center justify-center mx-auto mb-6 text-brand-cyan border border-brand-cyan/20 relative">
+                  <ShieldCheck size={40} />
+                  <div className="absolute inset-0 rounded-full border border-brand-cyan animate-ping opacity-20"></div>
+                </div>
+                <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Neural Handshake</h2>
+                <p className="text-white/40 text-xs px-8 leading-relaxed">
+                  A synchronization code has been transmitted to <span className="text-brand-cyan font-bold">{formData.email}</span>.
+                </p>
+              </div>
+
+              <div className="space-y-6">
+                <OTPInput value={formData.otp} onChange={(val) => setFormData({ ...formData, otp: val })} />
+                
+                <AuthButton loading={loading} onClick={onVerify}>
+                  Finalize Verification
+                </AuthButton>
+
+                <div className="text-center space-y-4">
+                  <p className="text-[10px] font-bold text-white/20 uppercase tracking-[0.2em]">
+                    Didn't receive code? <button className="text-brand-cyan hover:text-brand-purple transition-colors ml-1">Resend in 0:59</button>
+                  </p>
+                  <button 
+                    onClick={() => setStep('info')}
+                    className="flex items-center justify-center gap-2 text-slate-500 dark:text-white/30 text-[10px] font-black uppercase tracking-widest hover:text-slate-900 dark:hover:text-white mx-auto transition-all"
+                  >
+                    <ChevronLeft size={14} /> Correct Information
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-    </div>
+    </AuthLayout>
   )
 }
 
-function GoogleGlyph() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden>
-      <path
-        fill="#4285F4"
-        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-      />
-      <path
-        fill="#34A853"
-        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-      />
-      <path
-        fill="#EA4335"
-        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-      />
-    </svg>
-  )
-}
-
-function TabButton({ active, children, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`interactive-chip flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
-        active ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-600 dark:text-slate-400'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
-
-function Field({ label, ...inputProps }) {
-  return (
-    <label className="block">
-      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{label}</span>
-      <input
-        {...inputProps}
-        className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-base outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900"
-      />
-    </label>
-  )
-}
+const SocialButton = ({ icon, onClick }) => (
+  <button 
+    type="button"
+    onClick={onClick}
+    className="flex items-center justify-center p-4 rounded-2xl bg-white/5 border border-white/10 text-slate-500 dark:text-white/40 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 hover:border-slate-300 dark:hover:border-white/20 transition-all active:scale-95 group"
+  >
+    <div className="group-hover:scale-110 transition-transform">{icon}</div>
+  </button>
+);

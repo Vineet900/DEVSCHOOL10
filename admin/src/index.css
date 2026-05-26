@@ -2,177 +2,209 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-html {
-  color-scheme: light;
-  --interactive-shadow: 0 12px 28px rgba(37, 99, 235, 0.14);
-  --interactive-shadow-strong: 0 16px 36px rgba(37, 99, 235, 0.18);
-  --interactive-ring: 0 0 0 3px rgba(59, 130, 246, 0.18);
-  --interactive-border: rgba(59, 130, 246, 0.42);
-  --interactive-surface: rgba(255, 255, 255, 0.88);
-  --interactive-surface-strong: rgba(239, 246, 255, 0.98);
-  --interactive-accent-shadow: 0 14px 32px rgba(37, 99, 235, 0.2);
-}
-
-html.dark {
-  color-scheme: dark;
-  --interactive-shadow: 0 16px 38px rgba(15, 23, 42, 0.36);
-  --interactive-shadow-strong: 0 20px 44px rgba(15, 23, 42, 0.46);
-  --interactive-ring: 0 0 0 3px rgba(96, 165, 250, 0.22);
-  --interactive-border: rgba(96, 165, 250, 0.42);
-  --interactive-surface: rgba(15, 23, 42, 0.82);
-  --interactive-surface-strong: rgba(15, 23, 42, 0.94);
-  --interactive-accent-shadow: 0 18px 38px rgba(2, 6, 23, 0.44);
+:root {
+  --neon-blue: #00f0ff;
+  --neon-purple: #bd00ff;
+  --dark-bg: #05060b;
+  --panel-bg: #0d0f19;
+  --panel-border: rgba(0, 240, 255, 0.15);
+  --interactive-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+  --interactive-shadow-strong: 0 0 25px rgba(0, 240, 255, 0.4);
 }
 
 html,
 body,
 #root {
   height: 100%;
+  background-color: var(--dark-bg);
+  color: #e2e8f0;
 }
 
 body {
   margin: 0;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  background:
-    radial-gradient(circle at top, rgba(37, 99, 235, 0.12), transparent 34%),
-    linear-gradient(180deg, #f8fafc 0%, #eef2ff 45%, #f8fafc 100%);
-  color: #0f172a;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-image: 
+    radial-gradient(circle at 10% 10%, rgba(0, 240, 255, 0.08), transparent 30%),
+    radial-gradient(circle at 90% 80%, rgba(189, 0, 255, 0.06), transparent 35%),
+    linear-gradient(180deg, #05060b 0%, #080912 100%);
   overflow: hidden;
   scroll-behavior: smooth;
 }
 
-.dark body {
-  background:
-    radial-gradient(circle at top, rgba(59, 130, 246, 0.16), transparent 32%),
-    linear-gradient(180deg, #06070f 0%, #0b1020 45%, #110d1f 100%);
-  color: #f8fafc;
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(13, 15, 25, 0.5);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 240, 255, 0.3);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 240, 255, 0.6);
 }
 
-.app-shell {
-  background:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.14), transparent 28%),
-    radial-gradient(circle at top right, rgba(251, 146, 60, 0.14), transparent 30%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(241, 245, 249, 0.92));
+/* Glassmorphism & Cyber Card styles */
+.cyber-panel {
+  background: rgba(13, 15, 25, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
 }
 
-.dark .app-shell {
-  background:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.18), transparent 30%),
-    radial-gradient(circle at top right, rgba(168, 85, 247, 0.2), transparent 32%),
-    linear-gradient(180deg, rgba(6, 7, 15, 0.96), rgba(11, 16, 32, 0.98));
+.cyber-panel-glow {
+  background: rgba(13, 15, 25, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.5),
+    0 0 10px rgba(0, 240, 255, 0.1);
 }
 
-.app-sidebar,
-.app-mobile-nav {
-  border-color: rgba(148, 163, 184, 0.18);
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+/* Cyber Neon Text & Glows */
+.text-neon-blue {
+  color: var(--neon-blue);
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.5);
 }
 
-.dark .app-sidebar,
-.dark .app-mobile-nav {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(2, 6, 23, 0.74);
-  box-shadow: 0 18px 48px rgba(2, 6, 23, 0.36);
+.text-neon-purple {
+  color: var(--neon-purple);
+  text-shadow: 0 0 8px rgba(189, 0, 255, 0.5);
 }
 
-.premium-bg {
-  background:
-    radial-gradient(circle at 15% 15%, rgba(59, 130, 246, 0.18), transparent 42%),
-    radial-gradient(circle at 85% 10%, rgba(168, 85, 247, 0.2), transparent 40%),
-    radial-gradient(circle at 50% 90%, rgba(16, 185, 129, 0.14), transparent 44%);
+.bg-neon-blue {
+  background-color: var(--neon-blue);
 }
 
-.glass-card {
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.08);
+.border-neon-blue {
+  border-color: var(--neon-blue);
 }
 
-.dark .glass-card {
-  border-color: rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.55);
-  box-shadow: 0 14px 34px rgba(2, 6, 23, 0.35);
+/* Interactive elements */
+button:not(:disabled), 
+a {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-:where(button:not(:disabled), a[href][class], [role='button'], label[for], select) {
-  transition:
-    transform 180ms ease,
-    box-shadow 180ms ease,
-    border-color 180ms ease,
-    background-color 180ms ease,
-    color 180ms ease,
-    filter 180ms ease,
-    opacity 180ms ease;
+.cyber-btn {
+  background: rgba(0, 240, 255, 0.1);
+  border: 1px solid var(--neon-blue);
+  color: var(--neon-blue);
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.15);
+  text-shadow: 0 0 4px rgba(0, 240, 255, 0.3);
 }
 
-:where(button:not(:disabled), a[href][class], [role='button'], label[for]) {
-  cursor: pointer;
+.cyber-btn:hover:not(:disabled) {
+  background: var(--neon-blue);
+  color: #05060b;
+  box-shadow: 
+    0 0 15px rgba(0, 240, 255, 0.5),
+    0 0 30px rgba(0, 240, 255, 0.2);
+  transform: translateY(-1px);
 }
 
-.interactive-card,
-.interactive-chip,
-.interactive-list-row,
-.interactive-strong {
-  transition:
-    transform 180ms ease,
-    box-shadow 180ms ease,
-    border-color 180ms ease,
-    background-color 180ms ease,
-    color 180ms ease,
-    filter 180ms ease,
-    opacity 180ms ease;
+.cyber-btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
-:where(button:not(:disabled), a[href][class], [role='button'], label[for], select):focus-visible {
-  outline: none;
-  box-shadow: var(--interactive-ring);
+.cyber-btn-purple {
+  background: rgba(189, 0, 255, 0.1);
+  border: 1px solid var(--neon-purple);
+  color: var(--neon-purple);
+  box-shadow: 0 0 8px rgba(189, 0, 255, 0.15);
+  text-shadow: 0 0 4px rgba(189, 0, 255, 0.3);
 }
 
-@media (hover: hover) and (pointer: fine) {
-  :where(button:not(:disabled), a[href][class], [role='button'], label[for]) {
-    will-change: transform;
+.cyber-btn-purple:hover:not(:disabled) {
+  background: var(--neon-purple);
+  color: #fff;
+  box-shadow: 
+    0 0 15px rgba(189, 0, 255, 0.5),
+    0 0 30px rgba(189, 0, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+/* Input Fields styles */
+.cyber-input {
+  background: rgba(8, 9, 18, 0.8) !important;
+  border: 1px solid rgba(0, 240, 255, 0.2) !important;
+  color: #f1f5f9 !important;
+  transition: all 0.25s ease;
+}
+
+.cyber-input:focus {
+  border-color: var(--neon-blue) !important;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.25) !important;
+  outline: none !important;
+}
+
+.cyber-input::placeholder {
+  color: #64748b;
+}
+
+/* Custom glow animations */
+@keyframes neonPulse {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.1), inset 0 0 5px rgba(0, 240, 255, 0.05);
   }
-
-  :where(button:not(:disabled), a[href][class], [role='button'], label[for]):hover {
-    transform: translateY(-1px);
-    filter: brightness(1.02);
+  50% {
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.25), inset 0 0 10px rgba(0, 240, 255, 0.15);
   }
+}
 
-  :where(button:not(:disabled), a[href][class], [role='button'], label[for]):active {
-    transform: translateY(0);
-    filter: brightness(0.99);
-  }
+.pulse-glow {
+  animation: neonPulse 3s infinite alternate;
+}
 
-  .interactive-card:hover,
-  .interactive-list-row:hover {
-    border-color: var(--interactive-border);
-    background: var(--interactive-surface-strong);
-    box-shadow: var(--interactive-shadow-strong);
-  }
+/* Table overrides for dark style */
+.cyber-table th {
+  background: rgba(17, 20, 36, 0.8);
+  border-bottom: 2px solid rgba(0, 240, 255, 0.2);
+  color: var(--neon-blue);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 
-  .interactive-chip:hover {
-    border-color: var(--interactive-border);
-    box-shadow: var(--interactive-shadow);
-  }
+.cyber-table tr {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
 
-  .interactive-strong:hover {
-    box-shadow: var(--interactive-accent-shadow);
-    filter: brightness(1.04);
-  }
+.cyber-table tr:hover {
+  background: rgba(0, 240, 255, 0.03);
+}
 
-  :where(button.glass-card:not(:disabled), a[href][class].glass-card, [role='button'].glass-card):hover {
-    box-shadow: var(--interactive-shadow-strong);
-  }
+.cyber-badge-blue {
+  background: rgba(0, 240, 255, 0.1);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  color: var(--neon-blue);
+}
 
-  select:hover {
-    border-color: rgba(96, 165, 250, 0.55);
-    box-shadow: var(--interactive-shadow);
-  }
+.cyber-badge-purple {
+  background: rgba(189, 0, 255, 0.1);
+  border: 1px solid rgba(189, 0, 255, 0.3);
+  color: var(--neon-purple);
+}
 
-  .glass-card:has(button:hover, a[href][class]:hover) {
-    box-shadow: var(--interactive-shadow-strong);
-  }
+.cyber-badge-green {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #10b981;
+}
+
+.cyber-badge-red {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+.cyber-badge-yellow {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
 }

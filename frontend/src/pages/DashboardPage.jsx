@@ -1,100 +1,99 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Flame, Timer, Trophy } from 'lucide-react'
+import { Flame, Timer, Trophy, Zap, BookOpen, Layout } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { t } from '../data/i18n'
-import { API_BASE_URL } from '../lib/api'
-
-const API_BASE = API_BASE_URL
+import { courseAPI } from '../lib/api'
 
 export default function DashboardPage() {
-  const { state, actions } = useApp()
+  const { state, profile } = useApp()
   const language = state.language
-  const [loading, setLoading] = useState(false)
+  const [dailyPlan, setDailyPlan] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function loadPlan() {
-      setLoading(true)
       try {
-        const query = new URLSearchParams({
-          level: state.learningLevel || 'beginner',
-          language: state.language || 'en',
-        })
-        const response = await fetch(`${API_BASE}/api/daily-plan?${query.toString()}`)
-        const plan = await response.json()
-        actions.refreshDailyPlan(plan)
+        const level = state.learningLevel || 'beginner'
+        const { data: res } = await courseAPI.getDailyPlan(level, language)
+        if (res.success) setDailyPlan(res.data)
+      } catch (err) {
+        console.error('Failed to load daily plan')
       } finally {
         setLoading(false)
       }
     }
     loadPlan()
-  }, [actions, state.learningLevel, state.language])
+  }, [state.learningLevel, language])
 
   return (
-    <section className="space-y-4">
+    <div className="space-y-10">
       <header>
-        <h2 className="text-2xl font-bold">{t(language, 'continueLearning')}</h2>
-        <p className="text-sm text-slate-600 dark:text-slate-300">
-          {loading ? `${t(language, 'loading')}` : t(language, 'markChallenge')}
-        </p>
+        <div className="flex items-center gap-3 mb-2">
+           <Zap size={18} className="text-brand-cyan" />
+           <span className="text-[10px] font-black text-brand-cyan uppercase tracking-widest">Active Roadmap</span>
+        </div>
+        <h2 className="text-4xl font-black text-white">{t(language, 'continueLearning')}</h2>
       </header>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <Card title={t(language, 'chapterLabel')} value={state.dailyPlan.lesson} />
-        <Card title={t(language, 'practice')} value={state.dailyPlan.exercise} />
-        <Card title={t(language, 'chapterQuiz')} value={state.dailyPlan.quiz} />
-        <Card title={t(language, 'projects')} value={state.dailyPlan.miniProject} />
+      {/* Daily Plan Grid */}
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+        <PlanCard title="Current Target" value={dailyPlan?.lesson || '...'} icon={<BookOpen size={18}/>} />
+        <PlanCard title="Drill" value={dailyPlan?.exercise || '...'} icon={<Layout size={18}/>} />
+        <PlanCard title="Assessment" value={dailyPlan?.quiz || '...'} icon={<Trophy size={18}/>} />
+        <PlanCard title="Mini Project" value={dailyPlan?.miniProject || '...'} icon={<Zap size={18}/>} />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Stat icon={Flame} label={t(language, 'practiceStreak')} value={`${state.streak} ${t(language, 'days')}`} />
-        <Stat icon={Trophy} label={t(language, 'skillPercentage')} value={`${stats.skillPercentage ?? 0}%`} />
-        <Stat icon={Timer} label={t(language, 'studyHours')} value={`${state.studyHours} hrs`} />
-      </div>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Stat icon={Trophy} label={t(language, 'myPoints')} value={`${state.studyPoints}`} />
-        <Stat icon={Flame} label={t(language, 'xp')} value={`${state.xp}`} />
-        <Stat icon={Timer} label={t(language, 'practiceStreak')} value={`${state.streak} ${t(language, 'days')}`} />
+      {/* Primary Stats */}
+      <div className="grid gap-6 sm:grid-cols-3">
+        <Stat icon={Flame} label="XP Points" value={state.xp || 0} color="brand-cyan" />
+        <Stat icon={Trophy} label="Study Points" value={state.studyPoints || 0} color="brand-purple" />
+        <Stat icon={Timer} label="Practice Streak" value={`${state.streak || 0} days`} color="brand-blue" />
       </div>
 
-      <div className="rounded-2xl bg-slate-100 p-4 dark:bg-slate-800">
-        <h3 className="font-semibold">{t(language, 'continueLearning')}</h3>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          <QuickButton to="/home" text={t(language, 'continueLearning')} />
-          <QuickButton to="/practice" text={t(language, 'practice')} />
-          <QuickButton to="/tutor" text={t(language, 'tutor')} />
-          <QuickButton to="/stats" text={t(language, 'skillPercentage')} />
-          <QuickButton to="/settings" text={t(language, 'settings')} />
+      {/* Action Hub */}
+      <div className="glass-card p-10 rounded-[2.5rem] border-white/5 bg-gradient-to-br from-white/[0.03] to-transparent">
+        <h3 className="text-xl font-black mb-8 flex items-center gap-3">
+          <Layout size={24} className="text-brand-cyan" /> Navigation Hub
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <QuickButton to="/courses" text="Roadmaps" />
+          <QuickButton to="/quizzes" text="Assessments" />
+          <QuickButton to="/practice" text="Sandboxes" />
+          <QuickButton to="/profile" text="My Profile" />
         </div>
       </div>
-    </section>
+    </div>
   )
 }
 
-function Card({ title, value }) {
+function PlanCard({ title, value, icon }) {
   return (
-    <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
-      <p className="text-xs uppercase text-slate-500">{title}</p>
-      <p className="mt-2 text-sm font-semibold">{value}</p>
-    </article>
-  )
-}
-
-function Stat({ icon: Icon, label, value }) {
-  return (
-    <div className="rounded-2xl bg-blue-600 p-4 text-white">
-      <div className="flex items-center gap-2">
-        <Icon size={16} />
-        <p className="text-xs uppercase">{label}</p>
+    <div className="glass-card p-6 rounded-3xl border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-all">
+      <div className="flex items-center gap-3 mb-4 text-white/30">
+        {icon}
+        <p className="text-[10px] font-black uppercase tracking-widest">{title}</p>
       </div>
-      <p className="mt-1 text-xl font-bold">{value}</p>
+      <p className="text-sm font-bold text-white/80 leading-relaxed">{value}</p>
+    </div>
+  )
+}
+
+function Stat({ icon: Icon, label, value, color }) {
+  return (
+    <div className="glass-card p-8 rounded-[2rem] border-white/5 bg-gradient-to-br from-white/[0.03] to-transparent group">
+      <div className={`w-12 h-12 rounded-2xl bg-${color}/10 flex items-center justify-center text-${color} mb-4 transition-transform group-hover:scale-110`}>
+        <Icon size={24} />
+      </div>
+      <p className="text-[10px] font-black text-white/20 uppercase tracking-widest mb-1">{label}</p>
+      <p className="text-3xl font-black text-white">{value}</p>
     </div>
   )
 }
 
 function QuickButton({ to, text }) {
   return (
-    <Link to={to} className="interactive-card rounded-xl border border-transparent bg-white px-4 py-3 text-center text-sm font-medium dark:bg-slate-900">
+    <Link to={to} className="px-6 py-4 rounded-2xl bg-white/5 border border-white/5 text-center text-sm font-black text-white/60 hover:text-white hover:bg-white/10 hover:border-brand-cyan/30 transition-all">
       {text}
     </Link>
   )

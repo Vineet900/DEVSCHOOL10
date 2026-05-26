@@ -29,7 +29,8 @@ export const quizzesService = {
 }
 
 export const analyticsService = {
-  getAnalytics: () => api.get('/analytics')
+  getAnalytics: () => api.get('/analytics'),
+  getStats: () => api.get('/analytics')
 }
 
 export const settingsService = {
@@ -51,3 +52,38 @@ export const assessmentsService = {
   getAssessments: () => api.get('/assessments'),
   createAssessment: (data) => api.post('/assessments', data)
 }
+
+export const chaptersService = {
+  getChapters: (courseId) => api.get(`/courses/${courseId}/sections`),
+  createChapter: (courseId, data) => api.post(`/courses/${courseId}/sections`, data),
+  updateChapter: (id, data) => api.put(`/sections/${id}`, data),
+  deleteChapter: (id) => api.delete(`/sections/${id}`),
+  bulkUploadChapters: (courseId, data) => api.post(`/courses/${courseId}/sections/bulk`, data)
+}
+
+export const rewardsService = {
+  getRedeemRequests: () => api.get('/rewards/redeem-requests'),
+  updateRedeemStatus: (id, status) => api.put(`/rewards/redeem-requests/${id}`, { status }),
+  getCoupons: () => api.get('/rewards/coupons'),
+  createCoupon: (data) => api.post('/rewards/coupons', data),
+  deleteCoupon: (id) => api.delete(`/rewards/coupons/${id}`)
+}
+
+export const notificationsService = {
+  sendNotification: (data) => api.post('/notifications/send', data)
+}
+
+export const moderationService = {
+  getReports: () => api.get('/moderation/reports'),
+  resolveReport: (id, status) => api.put(`/moderation/reports/${id}`, { status }),
+  deleteContent: (contentType, contentId) => api.post('/moderation/delete-content', { contentType, contentId })
+}
+
+export const logsService = {
+  getLogs: () => api.get('/logs')
+}
+
+
+
+
+

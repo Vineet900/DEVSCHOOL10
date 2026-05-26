@@ -1,0 +1,86 @@
+# ============================================================
+# DevSchool Pro — Docker Compose (Local Dev + Production)
+# ============================================================
+# Services:
+#   1. postgres  — Local PostgreSQL 16 database
+#   2. redis     — Rate limiting + AI context caching
+#   3. backend   — Express TypeScript API server
+#
+# Usage:
+#   docker-compose up -d              → Start all services
+#   docker-compose up -d postgres     → DB only (for local dev with npm run dev)
+#   docker-compose logs -f backend    → Stream backend logs
+#   docker-compose down -v            → Stop + remove volumes (DESTROYS DATA)
+# ============================================================
+
+services:
+  # ── PostgreSQL ───────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: devschool-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: devschool
+      POSTGRES_PASSWORD: devschool_secure_2026
+      POSTGRES_DB: devschool_pro
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Auto-run SQL files on first boot (schema, functions, indexes)
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devschool -d devschool_pro"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Redis ────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: devschool-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Backend API ──────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: devschool-backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      # Override DATABASE_URL to use Docker postgres service
+      DATABASE_URL: postgresql://devschool:devschool_secure_2026@postgres:5432/devschool_pro
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

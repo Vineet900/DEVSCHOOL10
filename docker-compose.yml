@@ -1,0 +1,221 @@
+# ============================================================
+# 🐳 DevSchool Pro — Production Docker Compose
+# ============================================================
+#
+# ARCHITECTURE:
+# ┌─────────┐    ┌──────────┐    ┌──────────┐
+# │  Nginx  │───▶│ Frontend │    │ Backend  │
+# │  :80    │───▶│  :5174   │    │  :4000   │
+# │  :443   │    └──────────┘    └────┬─────┘
+# └─────────┘                         │
+#                            ┌────────┴────────┐
+#                            │                  │
+#                       ┌────▼────┐       ┌────▼────┐
+#                       │Postgres │       │  Redis  │
+#                       │  :5432  │       │  :6379  │
+#                       └─────────┘       └─────────┘
+#
+# VOLUMES (Data survives container restart/delete/update):
+#   postgres_data  — All database tables, indexes, etc.
+#   redis_data     — Cache, rate limiting counters, sessions
+#   uploads_data   — User uploaded files (avatars, thumbnails)
+#   nginx_certs    — SSL certificates
+#
+# COMMANDS:
+#   docker-compose up -d                → Start everything
+#   docker-compose up -d postgres redis → DB only (for npm run dev)
+#   docker-compose logs -f backend      → Stream backend logs
+#   docker-compose down                 → Stop (DATA PRESERVED)
+#   docker-compose down -v              → Stop + DELETE ALL DATA ⚠️
+#   docker-compose build --no-cache     → Rebuild from scratch
+#   docker-compose restart backend      → Restart one service
+#   docker-compose ps                   → Status of all services
+#
+# ============================================================
+
+services:
+
+  # ── 1. PostgreSQL Database ─────────────────────────────────
+  # Your primary data store. Everything lives here:
+  # profiles, courses, lessons, quizzes, progress, etc.
+  #
+  # Volume: postgres_data — this is what keeps your data alive
+  # even if you run `docker-compose down` or rebuild images.
+  postgres:
+    image: postgres:16-alpine
+    container_name: devschool-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-devschool}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-devschool_secure_2026}
+      POSTGRES_DB: ${DB_NAME:-devschool_pro}
+      # Performance tuning for startup-scale
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      - "5432:5432"
+    volumes:
+      # 📦 PERMANENT STORAGE — your data lives here
+      - postgres_data:/var/lib/postgresql/data
+      # 🚀 Auto-run SQL on FIRST boot only (schema, functions, indexes)
+      - ./backend/sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-devschool} -d ${DB_NAME:-devschool_pro}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - devschool-network
+    # PostgreSQL performance config
+    command: >
+      postgres
+        -c shared_buffers=256MB
+        -c effective_cache_size=512MB
+        -c work_mem=16MB
+        -c maintenance_work_mem=128MB
+        -c max_connections=100
+        -c log_min_duration_statement=500
+
+  # ── 2. Redis (Cache + Rate Limiting + Sessions) ──────────
+  # Used for:
+  # - Rate limiting counters (per-user, per-IP)
+  # - AI context caching (5 min TTL)
+  # - Leaderboard cache (60s TTL)
+  # - Session data
+  redis:
+    image: redis:7-alpine
+    container_name: devschool-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    # Persist to disk every 60s if 100+ keys changed
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - devschool-network
+
+  # ── 3. Backend API Server ─────────────────────────────────
+  # Express + TypeScript compiled to JS
+  # Runs as non-root user inside container
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: devschool-backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # Override for Docker internal networking
+      DATABASE_URL: postgresql://${DB_USER:-devschool}:${DB_PASSWORD:-devschool_secure_2026}@postgres:5432/${DB_NAME:-devschool_pro}
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - devschool-network
+    # Memory limit — prevents OOM from killing the VPS
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── 4. Frontend (React/Vite — served via Nginx) ──────────
+  # Built as static files, served by Nginx
+  # Only the build output is used (not the dev server)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: devschool-frontend
+    restart: unless-stopped
+    networks:
+      - devschool-network
+    # No port exposed — Nginx proxies to this
+
+  # ── 5. Nginx Reverse Proxy ───────────────────────────────
+  # Routes traffic:
+  #   / → Frontend (React static files)
+  #   /api → Backend (Express API)
+  #   /health → Backend health check
+  #
+  # Also handles:
+  #   - SSL termination (when certs added)
+  #   - Gzip compression
+  #   - Static file caching headers
+  #   - Rate limiting at proxy level
+  #   - Security headers (HSTS, CSP, etc.)
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: devschool-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx_certs:/etc/nginx/ssl
+      - uploads_data:/var/www/uploads:ro
+    depends_on:
+      - backend
+      - frontend
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - devschool-network
+
+# ── Volumes (PERMANENT STORAGE) ──────────────────────────────
+# These survive:
+#   ✅ Container restart
+#   ✅ Container rebuild (docker-compose build)
+#   ✅ docker-compose down
+#   ✅ docker-compose up --force-recreate
+#
+# These are DELETED only by:
+#   ❌ docker-compose down -v (the -v flag)
+#   ❌ docker volume rm <name>
+#   ❌ docker system prune --volumes
+volumes:
+  postgres_data:
+    driver: local
+    name: devschool-postgres-data
+  redis_data:
+    driver: local
+    name: devschool-redis-data
+  uploads_data:
+    driver: local
+    name: devschool-uploads-data
+  nginx_certs:
+    driver: local
+    name: devschool-nginx-certs
+
+# ── Network ──────────────────────────────────────────────────
+# All services communicate on this internal network.
+# Only Nginx exposes ports to the outside world.
+networks:
+  devschool-network:
+    driver: bridge
+    name: devschool-network

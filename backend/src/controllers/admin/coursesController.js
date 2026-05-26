@@ -52,11 +52,13 @@ export const getLessons = async (req, res) => {
   try {
     const { courseId } = req.params
     if (!adminSupabase) return res.json({ success: true, data: [] })
-    const { data, error } = await adminSupabase
-      .from('lessons')
-      .select('*')
-      .eq('course_id', courseId)
-      .order('chapter_number', { ascending: true })
+    
+    let query = adminSupabase.from('lessons').select('*').order('chapter_number', { ascending: true })
+    if (courseId && courseId !== 'all') {
+      query = query.eq('course_id', courseId)
+    }
+    
+    const { data, error } = await query
     if (error) throw error
     res.json({ success: true, message: "Lessons fetched", data })
   } catch (error) {

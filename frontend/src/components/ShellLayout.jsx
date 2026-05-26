@@ -1,268 +1,132 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import {
-  BookOpen,
-  Bot,
-  CalendarDays,
-  ChevronRight,
-  ClipboardCheck,
-  Coins,
-  Dumbbell,
-  House,
-  NotebookPen,
-  Trophy,
-} from 'lucide-react'
+import { Outlet, useLocation } from 'react-router-dom'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useApp } from '../context/AppContext'
-import AppLogo from './AppLogo'
-import { t } from '../data/i18n'
-
-const navItems = [
-  { to: '/home', label: 'Home', icon: House },
-  { to: '/courses', label: 'Courses', icon: BookOpen },
-  { to: '/exercises', label: 'Practice', icon: Dumbbell },
-  { to: '/quizzes', label: 'Assessments', icon: ClipboardCheck },
-  { to: '/tutor', label: 'AI Tutor', icon: Bot },
-
-  { to: '/home', label: 'Leaderboard', icon: Trophy, placeholder: true },
-  { to: '/home', label: 'Earn', icon: Coins, placeholder: true },
-  { to: '/home', label: 'Calendar', icon: CalendarDays, placeholder: true },
-  { to: '/home', label: 'Notes', icon: NotebookPen, placeholder: true },
-]
-
-function LinkItem({ item, disabled, active, onDisabledClick }) {
-  const Icon = item.icon
-  if (item.placeholder) {
-    return (
-      <div
-        className={`flex cursor-not-allowed items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium ${
-          active
-            ? 'bg-linear-to-r from-violet-500/30 via-blue-500/20 to-orange-500/30 text-white ring-1 ring-violet-400/40'
-            : 'text-slate-500 dark:text-slate-400'
-        }`}
-      >
-        <Icon size={18} />
-        <span>{item.label}</span>
-      </div>
-    )
-  }
-
-  return disabled ? (
-    <button
-      type="button"
-      aria-disabled="true"
-      onClick={onDisabledClick}
-      className={`flex w-full cursor-not-allowed items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-medium ${
-        active
-          ? 'bg-linear-to-r from-violet-500/30 via-blue-500/20 to-orange-500/30 text-white ring-1 ring-violet-400/40'
-          : 'text-slate-500 dark:text-slate-400'
-      }`}
-    >
-      <Icon size={18} />
-      <span>{item.label}</span>
-    </button>
-  ) : (
-    <NavLink
-      to={item.to}
-      className={({ isActive }) =>
-        `interactive-chip flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition ${
-          isActive
-            ? 'bg-linear-to-r from-violet-500/40 via-blue-500/30 to-orange-500/40 text-white ring-1 ring-violet-400/40'
-            : 'text-slate-700 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800/70'
-        }`
-      }
-    >
-      <Icon size={18} />
-      <span>{item.label}</span>
-    </NavLink>
-  )
-}
+import Navbar from './Navbar'
 
 export default function ShellLayout() {
   const location = useLocation()
-  const { state, actions, notice } = useApp()
+  const { assessmentMode, dbError } = useApp()
+
+  const isEditorRoute = location.pathname.startsWith('/editor')
   const isChapterRoute = location.pathname.startsWith('/chapter/')
-  const isProfileRoute = location.pathname.startsWith('/profile')
-  const isSettingsWorkspaceRoute = location.pathname.startsWith('/settings')
-  const isFocusedWorkspaceRoute = isProfileRoute || isSettingsWorkspaceRoute
-  const profileActive = location.pathname.startsWith('/profile')
-  const isAssessmentNavLocked = state.assessmentMode.active
-  const handleAssessmentNavAttempt = () => actions.registerAssessmentViolation('navigation')
 
   return (
-    <div className="app-shell h-screen overflow-hidden text-slate-900 transition-colors dark:text-white">
-      <div className={`relative h-full ${isFocusedWorkspaceRoute ? 'pb-0' : 'pb-20 md:pb-0'}`}>
-        {!isFocusedWorkspaceRoute ? (
-          <aside className="app-sidebar fixed inset-y-0 left-0 z-20 hidden h-screen w-[240px] border-r p-4 backdrop-blur-xl md:block">
-            <div className="mb-4 flex items-center gap-2">
-              <AppLogo size={30} />
-              <h1 className="text-2xl font-bold">DevSchool Pro</h1>
-            </div>
-            <ProfileShortcutCard
-              state={state}
-              profileActive={profileActive}
-              disabled={isAssessmentNavLocked}
-              onDisabledClick={handleAssessmentNavAttempt}
-            />
-            <label className="mb-4 block">
-              <span className="text-xs text-slate-500 dark:text-slate-400">{t(state.language, 'language')}</span>
-              <select
-                value={state.language}
-                onChange={(event) => actions.setLanguage(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 shadow-sm dark:border-white/20 dark:bg-slate-900/60 dark:text-white"
-              >
-                <option value="en">English</option>
-                <option value="hi">Hindi</option>
-                <option value="hinglish">Hinglish</option>
-              </select>
-            </label>
-            <nav className="space-y-2">
-              {navItems.map((item) => {
-                const active = location.pathname.startsWith(item.to) && !item.placeholder
-                const disabled = isAssessmentNavLocked && item.to !== '/quizzes'
-                return (
-                  <LinkItem
-                    key={`${item.label}-${item.to}`}
-                    item={item}
-                    active={active}
-                    disabled={disabled}
-                    onDisabledClick={handleAssessmentNavAttempt}
-                  />
-                )
-              })}
-            </nav>
-          </aside>
-        ) : null}
-        <main
-          className={`flex flex-col h-full w-full ${isFocusedWorkspaceRoute ? '' : 'md:pl-[248px]'} ${
-            isFocusedWorkspaceRoute || isChapterRoute ? 'overflow-hidden p-0' : 'overflow-y-auto p-4 md:p-6'
-          }`}
-        >
-          {(state.focusMode.sessionActive || state.assessmentMode.active) && (
-            <div className="sticky top-0 z-30 mb-3 rounded-xl border border-amber-400/50 bg-amber-100/90 px-3 py-2 text-sm font-semibold text-amber-900 shadow-sm dark:bg-amber-500/15 dark:text-amber-100">
-              {state.focusMode.sessionActive
-                ? `Focus Mode Active - ${Math.floor(state.focusMode.timerRemaining / 60)
-                    .toString()
-                    .padStart(2, '0')}:${String(state.focusMode.timerRemaining % 60).padStart(2, '0')}`
-                : `Assessment Active - ${Math.floor(state.assessmentMode.timerRemaining / 60)
-                    .toString()
-                    .padStart(2, '0')}:${String(state.assessmentMode.timerRemaining % 60).padStart(2, '0')}`}
-            </div>
-          )}
-          {!isFocusedWorkspaceRoute ? (
-            <>
-              <div className="mb-4 flex items-center justify-between gap-3 md:hidden">
-                <div className="flex items-center gap-2">
-                  <AppLogo size={24} />
-                  <h1 className="text-lg font-bold">DevSchool Pro</h1>
+    <div className="min-h-screen bg-bg-deep text-slate-900 dark:text-white selection:bg-brand-cyan/30 transition-colors duration-300">
+      {/* Dynamic Background */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-brand-cyan/10 blur-[120px] animate-pulse-slow" />
+        <div className="absolute bottom-[10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-brand-purple/10 blur-[120px] animate-pulse-slow" style={{ animationDelay: '2s' }} />
+      </div>
+
+      <Navbar />
+
+      <main className={`relative z-10 pt-20 ${isEditorRoute || isChapterRoute ? 'h-[calc(100vh-80px)] overflow-hidden' : 'min-h-screen'}`}>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={location.pathname}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.3 }}
+            className="h-full"
+          >
+            {/* Database Connection Failure Banner */}
+            {dbError && (
+              <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 mb-6">
+                <div className="glass-card border-red-500/30 bg-red-500/5 px-8 py-4 rounded-[1.5rem] flex items-center justify-between shadow-2xl">
+                  <div className="flex items-center gap-4">
+                    <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+                    <span className="text-[10px] font-black text-red-500 uppercase tracking-[0.2em]">
+                      Database Connection Failure
+                    </span>
+                  </div>
+                  <div className="flex-1 text-right ml-4">
+                    <span className="text-xs font-bold text-red-400">
+                      {dbError}
+                    </span>
+                  </div>
                 </div>
               </div>
-              <div className="mb-4 md:hidden">
-                <ProfileShortcutCard
-                  compact
-                  state={state}
-                  profileActive={profileActive}
-                  disabled={isAssessmentNavLocked}
-                  onDisabledClick={handleAssessmentNavAttempt}
-                />
+            )}
+
+            {/* Mission Active Banner */}
+            {assessmentMode.isActive && (
+              <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 mb-6">
+                <div className="glass-card border-brand-cyan/30 bg-brand-cyan/5 px-8 py-4 rounded-[1.5rem] flex items-center justify-between shadow-2xl">
+                  <div className="flex items-center gap-4">
+                    <div className="w-2.5 h-2.5 rounded-full bg-brand-cyan animate-ping" />
+                    <span className="text-[10px] font-black text-brand-cyan uppercase tracking-[0.2em]">
+                      Live Assessment Protocol
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-8">
+                    <div className="text-right">
+                       <p className="text-[10px] text-white/30 uppercase font-black">Time Remaining</p>
+                       <p className="text-xl font-mono font-black text-slate-900 dark:text-white">
+                          {Math.floor(assessmentMode.timerRemaining / 60).toString().padStart(2, '0')}:{String(assessmentMode.timerRemaining % 60).padStart(2, '0')}
+                       </p>
+                    </div>
+                    {assessmentMode.violations > 0 && (
+                      <div className="text-right">
+                        <p className="text-[10px] text-red-400 uppercase font-black">Violations</p>
+                        <p className="text-xl font-mono font-black text-red-500">-{assessmentMode.deductions} XP</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            </>
-          ) : null}
-          <Outlet />
-        </main>
-      </div>
+            )}
 
-      {!isFocusedWorkspaceRoute ? (
-        <nav className="app-mobile-nav fixed inset-x-0 bottom-0 z-20 border-t p-2 backdrop-blur-xl md:hidden">
-          <ul className="grid grid-cols-5 gap-1">
-            {navItems.slice(0, 5).map((item) => {
-              const Icon = item.icon
-              const active = location.pathname.startsWith(item.to)
-              const disabled = isAssessmentNavLocked && item.to !== '/quizzes'
-              return (
-                <li key={`${item.label}-${item.to}`}>
-                  {disabled ? (
-                    <button
-                      type="button"
-                      aria-disabled="true"
-                      onClick={handleAssessmentNavAttempt}
-                      className={`flex w-full flex-col items-center rounded-lg py-2 text-xs ${
-                        active
-                          ? 'bg-linear-to-r from-violet-500/40 via-blue-500/30 to-orange-500/40 text-white'
-                          : 'cursor-not-allowed text-slate-500 dark:text-slate-400'
-                      }`}
-                    >
-                      <Icon size={18} />
-                      <span>{item.label}</span>
-                    </button>
-                  ) : (
-                    <NavLink
-                      to={item.to}
-                      className={`interactive-chip flex flex-col items-center rounded-lg py-2 text-xs ${
-                        active
-                          ? 'bg-linear-to-r from-violet-500/40 via-blue-500/30 to-orange-500/40 text-white'
-                          : 'text-slate-600 dark:text-slate-300'
-                      }`}
-                    >
-                      <Icon size={18} />
-                      <span>{item.label}</span>
-                    </NavLink>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
-        </nav>
-      ) : null}
-      {notice ? (
-        <div className="pointer-events-none fixed right-4 top-4 z-50 max-w-sm rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
-          {notice.message}
-        </div>
-      ) : null}
-    </div>
-  )
-}
+            <Outlet />
+          </motion.div>
+        </AnimatePresence>
+      </main>
 
-function ProfileShortcutCard({ state, profileActive, compact = false, disabled = false, onDisabledClick }) {
-  const baseClassName = compact
-    ? 'rounded-2xl border border-slate-200/80 bg-white/75 p-3 shadow-sm dark:border-white/10 dark:bg-white/5'
-    : 'mb-5 rounded-2xl border border-slate-200/80 bg-white/70 p-3 shadow-sm dark:border-white/10 dark:bg-white/5'
-
-  const profileCardClassName = profileActive
-    ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-100'
-    : 'border-slate-200 bg-white/80 text-slate-700 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-100'
-
-  const content = (
-    <>
-      <div className="flex items-center gap-3">
-        {state.user.avatar ? (
-          <img src={state.user.avatar} alt={`${state.user.name} avatar`} className="h-10 w-10 rounded-full object-cover shadow-sm" />
-        ) : (
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-linear-to-br from-violet-500 to-blue-500 text-sm font-bold text-white">
-            {(state.user.name || 'L').slice(0, 1).toUpperCase()}
+      {/* Footer */}
+      {!isEditorRoute && !isChapterRoute && (
+        <footer className="relative z-10 py-16 border-t border-white/5 bg-bg-deep/80 backdrop-blur-md transition-colors duration-300">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-16 mb-16">
+              <div className="col-span-1 md:col-span-2 space-y-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-brand-cyan/20 flex items-center justify-center">
+                    <div className="w-5 h-5 rounded-md bg-brand-cyan shadow-[0_0_15px_rgba(34,211,238,0.5)]" />
+                  </div>
+                  <span className="text-2xl font-black">DevSchool <span className="text-brand-cyan">Pro</span></span>
+                </div>
+                <p className="text-white/40 text-sm max-w-sm leading-relaxed">
+                  The mission-critical learning platform for the next generation of interstellar developers. 
+                  Master the stack, earn clearance, and build the future.
+                </p>
+              </div>
+              
+              {['Platform', 'Company'].map(group => (
+                <div key={group}>
+                  <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-[0.2em] mb-8">{group}</h4>
+                  <ul className="space-y-4">
+                    {(group === 'Platform' 
+                      ? ['Roadmaps', 'Assessments', 'Sandboxes', 'Certificates']
+                      : ['About Mission', 'Intel', 'Careers', 'Terminal']
+                    ).map(item => (
+                      <li key={item}>
+                        <a href="#" className="text-sm text-white/40 hover:text-brand-cyan transition-colors font-medium">{item}</a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+            
+            <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between gap-6 text-[10px] font-black uppercase tracking-widest text-white/20">
+              <p>© 2026 DevSchool Pro Intelligence Agency.</p>
+              <div className="flex items-center gap-8">
+                <a href="#" className="hover:text-slate-900 dark:hover:text-white transition-colors">Privacy Protocol</a>
+                <a href="#" className="hover:text-slate-900 dark:hover:text-white transition-colors">Service Terms</a>
+              </div>
+            </div>
           </div>
-        )}
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">{state.user.name || 'Learner'}</p>
-          <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-            Level {Math.max(1, Math.floor((state.xp || 0) / 120) + 1)} - Full Stack Track
-          </p>
-        </div>
-        <ChevronRight size={16} className="shrink-0 opacity-70" />
-      </div>
-    </>
-  )
-
-  return disabled ? (
-    <button
-      type="button"
-      aria-disabled="true"
-      onClick={onDisabledClick}
-      className={`block w-full cursor-not-allowed text-left ${baseClassName} ${profileCardClassName}`}
-    >
-      {content}
-    </button>
-  ) : (
-    <NavLink to="/profile" className={`interactive-card block ${baseClassName} ${profileCardClassName}`}>
-      {content}
-    </NavLink>
+        </footer>
+      )}
+    </div>
   )
 }

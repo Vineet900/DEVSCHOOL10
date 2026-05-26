@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -90,6 +90,7 @@ export default function ProfileSettingsModule({
   compactCopy = false,
   showBackButton = false,
   backFallbackPath = '/home',
+  standalone = false,
 }) {
   const { state, actions } = useApp()
   const navigate = useNavigate()
@@ -100,6 +101,15 @@ export default function ProfileSettingsModule({
   const [feedback, setFeedback] = useState(null)
   const [securityPending, setSecurityPending] = useState(false)
   const [pendingDialog, setPendingDialog] = useState(null)
+  // Track whether API has already populated the form so we don't overwrite it
+  const apiDataLoadedRef = useRef(false)
+  
+  useEffect(() => {
+    if (feedback && feedback.type !== 'error') {
+      const timer = setTimeout(() => setFeedback(null), 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [feedback])
 
   const currentUser = state.user
   const ownerKey = useMemo(() => getProfileOwnerKey(currentUser), [currentUser])
@@ -109,37 +119,82 @@ export default function ProfileSettingsModule({
     () => ({
       name: currentUser.name || '',
       username: currentUser.username || deriveFallbackUsername(currentUser),
-      email: currentUser.email || '',
-      phone: currentUser.phone || '',
+      email: currentUser.email || state.profileEmail || '',
+      phone: currentUser.phone || state.profilePhone || '',
       bio: state.profileBio || '',
       avatar: currentUser.avatar || '',
+      location: state.profileLocation || '',
+      portfolio: state.profilePortfolio || '',
+      techStack: state.profileTechStack || [],
+      learningGoals: state.profileLearningGoals || [],
     }),
-    [currentUser, state.profileBio],
+    [currentUser, state.profileBio, state.profileEmail, state.profilePhone, state.profileLocation, state.profilePortfolio, state.profileTechStack, state.profileLearningGoals],
   )
   const [accountForm, setAccountForm] = useState(() => profileSnapshot)
   const [securityForm, setSecurityForm] = useState(createEmptySecurityForm)
 
   useEffect(() => {
-    setAccountForm(profileSnapshot)
+    // If API has already loaded fresh data, only sync non-contact fields
+    // to avoid overwriting email/phone that came from the server
+    if (apiDataLoadedRef.current) {
+      setAccountForm(prev => ({
+        ...profileSnapshot,
+        // Preserve email and phone loaded from API (don't overwrite with stale auth data)
+        email: prev.email || profileSnapshot.email,
+        phone: prev.phone || profileSnapshot.phone,
+      }))
+    } else {
+      setAccountForm(profileSnapshot)
+    }
   }, [profileSnapshot])
 
   // Load user profile from API on mount if logged in
   useEffect(() => {
+    apiDataLoadedRef.current = false
     const loadUserProfile = async () => {
       const supabaseConfigured = currentUser.loggedIn && currentUser.id
       if (!supabaseConfigured) return
 
-      const { data: apiUser, error } = await userAPI.getProfile()
+      try {
+        const { data: responseData, error } = await userAPI.getProfile()
 
-      if (!error && apiUser) {
-        setAccountForm({
-          name: apiUser.name || '',
-          username: apiUser.username || '',
-          email: apiUser.email || '',
-          phone: apiUser.phone || '',
-          bio: apiUser.bio || '',
-          avatar: apiUser.avatar || '',
-        })
+        if (!error && responseData?.data) {
+          const userObj = responseData.data;
+          const profileObj = userObj.profile || {};
+          let parsedBio = { text: '', location: '', portfolio: '', techStack: [], learningGoals: [] }
+          try {
+            if (profileObj.bio && profileObj.bio.trim().startsWith('{')) {
+              const json = JSON.parse(profileObj.bio)
+              parsedBio.text = json.bio || ''
+              parsedBio.location = json.location || ''
+              parsedBio.portfolio = json.portfolio || ''
+              parsedBio.techStack = Array.isArray(json.techStack) ? json.techStack : []
+              parsedBio.learningGoals = Array.isArray(json.learningGoals) ? json.learningGoals : []
+            } else {
+              parsedBio.text = profileObj.bio || ''
+            }
+          } catch (e) {
+            parsedBio.text = profileObj.bio || ''
+          }
+
+          // Mark that we've loaded fresh data from API — prevents profileSnapshot
+          // effect from overwriting these values on subsequent auth re-renders
+          apiDataLoadedRef.current = true
+          setAccountForm({
+            name: profileObj.full_name || userObj.name || '',
+            username: profileObj.username || userObj.username || '',
+            email: userObj.email || '',
+            phone: userObj.phone || '',
+            bio: parsedBio.text,
+            location: parsedBio.location,
+            portfolio: parsedBio.portfolio,
+            techStack: parsedBio.techStack,
+            learningGoals: parsedBio.learningGoals,
+            avatar: profileObj.avatar_url || '',
+          })
+        }
+      } catch (err) {
+        console.warn('Failed to load user profile from API:', err.message || err)
       }
     }
 
@@ -189,25 +244,47 @@ export default function ProfileSettingsModule({
     const supabaseConfigured = currentUser.loggedIn && currentUser.id
     
     if (supabaseConfigured) {
-      const { data: apiResponse, error: apiError } = await userAPI.updateProfile({
-        name: sanitized.name,
-        email: sanitized.email,
-        phone: sanitized.phone,
-        username: sanitized.username,
-        bio: sanitized.bio,
-        avatar: sanitized.avatar,
-      })
+      try {
+        const bioPayload = JSON.stringify({
+          bio: sanitized.bio,
+          location: sanitized.location || '',
+          portfolio: sanitized.portfolio || '',
+          techStack: sanitized.techStack || [],
+          learningGoals: sanitized.learningGoals || [],
+        })
 
-      if (apiError) {
-        setFeedback({ type: 'error', message: apiError.error || 'Failed to save profile to server.' })
-        return
+        const { data: apiResponse } = await userAPI.updateProfile({
+          full_name: sanitized.name,
+          username: sanitized.username,
+          bio: bioPayload,
+          avatar_url: sanitized.avatar,
+        })
+
+        if (!apiResponse || !apiResponse.success) {
+          throw new Error('Failed to save profile to server.')
+        }
+
+        const updatedProfile = apiResponse.data || {}
+        setAccountErrors({})
+        setAccountForm({
+          name: updatedProfile.full_name || sanitized.name,
+          username: updatedProfile.username || sanitized.username,
+          email: sanitized.email,
+          phone: sanitized.phone,
+          bio: sanitized.bio,
+          location: sanitized.location,
+          portfolio: sanitized.portfolio,
+          techStack: sanitized.techStack,
+          learningGoals: sanitized.learningGoals,
+          avatar: updatedProfile.avatar_url || '',
+        })
+        
+        // Also update local state
+        actions.saveAccountProfile(sanitized)
+        setFeedback({ type: 'success', message: 'Account settings saved successfully.' })
+      } catch (err) {
+        setFeedback({ type: 'error', message: err.message || 'Failed to save profile to server.' })
       }
-
-      setAccountErrors({})
-      setAccountForm(apiResponse)
-      // Also update local state
-      actions.saveAccountProfile(sanitized)
-      setFeedback({ type: 'success', message: 'Account settings saved successfully.' })
       return
     }
 
@@ -220,7 +297,14 @@ export default function ProfileSettingsModule({
     }
 
     setAccountErrors({})
-    setAccountForm(result.profile)
+    setAccountForm({
+      ...result.profile,
+      bio: result.profile.bio || '',
+      location: result.profile.location || '',
+      portfolio: result.profile.portfolio || '',
+      techStack: result.profile.techStack || [],
+      learningGoals: result.profile.learningGoals || [],
+    })
     setFeedback({ type: 'success', message: 'Account settings saved successfully.' })
   }
 
@@ -352,25 +436,25 @@ export default function ProfileSettingsModule({
       return (
         <PanelShell title="Profile Overview" description={compactCopy ? '' : 'A quick snapshot of your learner identity, stats, and next actions.'}>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <MetricCard label="Level" value={`Lv. ${xpProgress.level}`} icon={Trophy} />
-            <MetricCard label="Study Points" value={state.studyPoints.toLocaleString()} icon={Star} />
-            <MetricCard label="Weekly Points" value={weeklyPoints.toLocaleString()} icon={WalletCards} />
+            <MetricCard label="Level" value={`Lv. ${xpProgress?.level || 1}`} icon={Trophy} />
+            <MetricCard label="Study Points" value={(state.studyPoints || 0).toLocaleString()} icon={Star} />
+            <MetricCard label="Weekly Points" value={(weeklyPoints || 0).toLocaleString()} icon={WalletCards} />
             <MetricCard label="Streak" value={`${state.streak} days`} icon={Flame} />
             <MetricCard label="Daily Goal" value={`${state.dailyGoal} chapters`} icon={Target} />
             <MetricCard label="Focus Session" value={formatFocusDurationLabel(state.focusDurationMinutes)} icon={BookOpenCheck} />
           </div>
-          <div className="mt-6 rounded-[26px] border border-slate-200 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+          <div className="mt-6 rounded-[2rem] border border-white/5 bg-white/[0.02] p-6 shadow-sm">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="text-sm font-semibold text-slate-900 dark:text-white">Progress Snapshot</p>
-                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                <p className="text-sm font-extrabold text-white">Progress Snapshot</p>
+                <p className="mt-1 text-sm text-white/40 font-medium">
                   Your profile is ready for progress tracking, course milestones, and future earnings.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => navigate('/home')}
-                className="interactive-strong inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
+                className="px-6 py-3.5 rounded-2xl bg-brand-cyan text-bg-deep font-black text-sm hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(34,211,238,0.2)] flex items-center justify-center gap-2"
               >
                 <Trophy size={16} />
                 <span>View My Progress</span>
@@ -419,6 +503,55 @@ export default function ProfileSettingsModule({
               placeholder="+91 98765 43210"
             />
             <FormField
+              label="Location"
+              value={accountForm.location || ''}
+              onChange={(value) => handleAccountChange('location', value)}
+              placeholder="e.g. New Delhi, India"
+            />
+            <FormField
+              label="Portfolio URL"
+              value={accountForm.portfolio || ''}
+              onChange={(value) => handleAccountChange('portfolio', value)}
+              placeholder="e.g. https://myportfolio.dev"
+            />
+            <FormField
+              label="Tech Stack (comma-separated)"
+              value={Array.isArray(accountForm.techStack) ? accountForm.techStack.join(', ') : ''}
+              onChange={(value) => handleAccountChange('techStack', value.split(',').map(s => s.trim()))}
+              placeholder="e.g. React, Node.js, TypeScript"
+              className="md:col-span-2"
+            />
+            <FormField
+              label="Learning Goal 1"
+              value={accountForm.learningGoals?.[0] || ''}
+              onChange={(value) => {
+                const goals = [...(accountForm.learningGoals || [])]
+                goals[0] = value
+                handleAccountChange('learningGoals', goals)
+              }}
+              placeholder="e.g. Master System Design"
+            />
+            <FormField
+              label="Learning Goal 2"
+              value={accountForm.learningGoals?.[1] || ''}
+              onChange={(value) => {
+                const goals = [...(accountForm.learningGoals || [])]
+                goals[1] = value
+                handleAccountChange('learningGoals', goals)
+              }}
+              placeholder="e.g. Learn DevOps & Cloud"
+            />
+            <FormField
+              label="Learning Goal 3"
+              value={accountForm.learningGoals?.[2] || ''}
+              onChange={(value) => {
+                const goals = [...(accountForm.learningGoals || [])]
+                goals[2] = value
+                handleAccountChange('learningGoals', goals)
+              }}
+              placeholder="e.g. Contribute to Open Source"
+            />
+            <FormField
               label="Bio"
               as="textarea"
               value={accountForm.bio}
@@ -427,19 +560,19 @@ export default function ProfileSettingsModule({
               className="md:col-span-2"
             />
           </div>
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <button
               type="button"
               onClick={handleAccountSave}
-              className="interactive-strong inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+              className="px-6 py-3.5 rounded-2xl bg-brand-cyan text-bg-deep font-black text-sm hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(34,211,238,0.2)] flex items-center justify-center gap-2"
             >
               <Save size={16} />
-              <span>Save</span>
+              <span>Save Changes</span>
             </button>
             <button
               type="button"
               onClick={handleAccountCancel}
-              className="interactive-chip inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800"
+              className="px-6 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-slate-900 dark:text-white font-bold hover:bg-white/10 text-sm transition-all flex items-center justify-center gap-2"
             >
               <RotateCcw size={16} />
               <span>Cancel</span>
@@ -485,12 +618,12 @@ export default function ProfileSettingsModule({
               error={securityErrors.confirmPassword}
             />
           </div>
-          <div className="mt-6 flex flex-col gap-3 lg:flex-row">
+          <div className="mt-8 flex flex-col gap-3 lg:flex-row">
             <button
               type="button"
               disabled={securityPending}
               onClick={handleSecuritySubmit}
-              className="interactive-strong inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="px-6 py-3.5 rounded-2xl bg-brand-cyan text-bg-deep font-black text-sm hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(34,211,238,0.2)] disabled:cursor-not-allowed disabled:opacity-60 flex items-center justify-center gap-2"
             >
               <KeyRound size={16} />
               <span>{securityPending ? 'Updating...' : 'Change Password'}</span>
@@ -501,7 +634,7 @@ export default function ProfileSettingsModule({
                 setSecurityErrors({})
                 setSecurityForm(createEmptySecurityForm())
               }}
-              className="interactive-chip inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800"
+              className="px-6 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-slate-900 dark:text-white font-bold hover:bg-white/10 text-sm transition-all flex items-center justify-center gap-2"
             >
               <RotateCcw size={16} />
               <span>Cancel</span>
@@ -509,7 +642,7 @@ export default function ProfileSettingsModule({
             <button
               type="button"
               onClick={handleResetPassword}
-              className="interactive-chip inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800"
+              className="px-6 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-slate-900 dark:text-white font-bold hover:bg-white/10 text-sm transition-all flex items-center justify-center gap-2"
             >
               <CircleHelp size={16} />
               <span>Reset Password</span>
@@ -522,10 +655,10 @@ export default function ProfileSettingsModule({
     if (activeSection === 'preferences') {
       return (
         <PanelShell title="Preferences" description="">
-          <div className="space-y-6">
+          <div className="space-y-8">
             <div>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">Theme</p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <p className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-white/30 mb-4 pl-1">Theme Appearance</p>
+              <div className="grid gap-4 sm:grid-cols-3">
                 {THEME_OPTIONS.map((option) => {
                   const Icon = option.icon
                   const active = state.themePreference === option.value
@@ -534,17 +667,17 @@ export default function ProfileSettingsModule({
                       key={option.value}
                       type="button"
                       onClick={() => actions.setThemePreference(option.value)}
-                      className={`interactive-card flex items-center justify-between rounded-2xl border px-4 py-4 text-left ${
+                      className={`flex items-center justify-between rounded-2xl border p-5 text-left transition-all ${
                         active
-                          ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-100'
-                          : 'border-slate-200 bg-white/80 text-slate-700 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100'
+                          ? 'border-brand-cyan bg-brand-cyan/10 text-slate-900 dark:text-white shadow-[0_0_20px_rgba(34,211,238,0.15)]'
+                          : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-600 dark:text-white/60 hover:text-slate-900 dark:hover:text-white hover:border-slate-300 dark:hover:border-white/20'
                       }`}
                     >
                       <div>
-                        <p className="font-semibold">{option.label}</p>
-                        <p className="mt-1 text-xs opacity-70">{option.value === 'system' ? 'Follows device appearance.' : `${option.label} mode`}</p>
+                        <p className="font-extrabold text-sm">{option.label}</p>
+                        <p className="mt-1 text-[10px] text-slate-500 dark:text-white/40">{option.value === 'system' ? 'Follow system settings' : `${option.label} mode`}</p>
                       </div>
-                      <Icon size={18} />
+                      <Icon size={18} className={active ? 'text-brand-cyan' : 'text-slate-400 dark:text-white/40'} />
                     </button>
                   )
                 })}
@@ -553,11 +686,11 @@ export default function ProfileSettingsModule({
 
             <DashboardCard>
               <label className="block">
-                <span className="text-sm font-semibold text-slate-900 dark:text-white">Language</span>
+                <span className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-white/30 pl-1">Language</span>
                 <select
                   value={state.language}
                   onChange={(event) => actions.setLanguage(event.target.value)}
-                  className="mt-3 w-full rounded-2xl border border-slate-300 bg-white/90 px-4 py-3 text-sm text-slate-900 shadow-sm outline-none focus:border-blue-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-white"
+                  className="mt-3 w-full rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-6 py-4 text-sm text-slate-900 dark:text-white outline-none focus:border-brand-cyan/50 transition-all appearance-none cursor-pointer"
                 >
                   {LANGUAGE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -578,7 +711,7 @@ export default function ProfileSettingsModule({
           <div className="grid gap-5 lg:grid-cols-2">
             <DashboardCard>
               <label className="block">
-                <span className="text-sm font-semibold text-slate-900 dark:text-white">Daily Goal</span>
+                <span className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-white/30 pl-1">Daily Goal</span>
                 <input
                   type="number"
                   min={DAILY_GOAL_LIMITS.min}
@@ -589,7 +722,7 @@ export default function ProfileSettingsModule({
                       clampNumber(event.target.value, DAILY_GOAL_LIMITS.min, DAILY_GOAL_LIMITS.max, state.dailyGoal),
                     )
                   }
-                  className="mt-3 w-full rounded-2xl border border-slate-300 bg-white/90 px-4 py-3 text-sm text-slate-900 shadow-sm outline-none focus:border-blue-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-white"
+                  className="mt-3 w-full rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-6 py-4 text-sm text-slate-900 dark:text-white outline-none focus:border-brand-cyan/50 transition-all"
                 />
               </label>
             </DashboardCard>
@@ -608,11 +741,11 @@ export default function ProfileSettingsModule({
           <div className="mt-5">
             <DashboardCard>
               <label className="block">
-                <span className="text-sm font-semibold text-slate-900 dark:text-white">Focus Session Duration</span>
+                <span className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-white/30 pl-1">Focus Session Duration</span>
                 <select
                   value={state.focusDurationMinutes}
                   onChange={(event) => actions.setFocusDurationMinutes(Number(event.target.value))}
-                  className="mt-3 w-full rounded-2xl border border-slate-300 bg-white/90 px-4 py-3 text-sm text-slate-900 shadow-sm outline-none focus:border-blue-400 dark:border-slate-700 dark:bg-slate-950/60 dark:text-white"
+                  className="mt-3 w-full rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-6 py-4 text-sm text-slate-900 dark:text-white outline-none focus:border-brand-cyan/50 transition-all appearance-none cursor-pointer"
                 >
                   {FOCUS_DURATION_OPTIONS.map((minutes) => (
                     <option key={minutes} value={minutes}>
@@ -631,25 +764,53 @@ export default function ProfileSettingsModule({
       return (
         <PanelShell title="Study & Earn" description="">
           <div className="grid gap-4 md:grid-cols-3">
-            <MetricCard label="Total Points" value={state.studyPoints.toLocaleString()} icon={Star} />
-            <MetricCard label="Weekly Points" value={weeklyPoints.toLocaleString()} icon={WalletCards} />
-            <MetricCard label="Current Streak" value={`${state.streak} days`} icon={Flame} />
+            <MetricCard label="Total Points" value={(state.studyPoints || 0).toLocaleString()} icon={Star} />
+            <MetricCard label="Weekly Points" value={(weeklyPoints || 0).toLocaleString()} icon={WalletCards} />
+            <MetricCard label="Current Streak" value={`${state.streak || 0} days`} icon={Flame} />
           </div>
-          <div className="mt-6 rounded-[26px] border border-slate-200 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+          <div className="mt-6 rounded-[2rem] border border-white/5 bg-white/[0.02] p-6 shadow-sm">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="text-sm font-semibold text-slate-900 dark:text-white">Points Overview</p>
-                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                  Rewards are being prepared. Your points, streak, and progress are already tracked live.
+                <p className="text-sm font-extrabold text-white">Convert XP to SP</p>
+                <p className="mt-1 text-sm text-white/40 font-medium">
+                  Exchange your hard-earned XP for Study Points (SP). 
+                  <span className="ml-1 font-bold text-brand-cyan">100 XP = 1 SP</span>.
+                </p>
+                <p className="mt-2 text-xs font-bold text-brand-purple">
+                  Current Study Points Balance: <span className="font-bold">{state.studyPoints || 0} SP</span>
                 </p>
               </div>
-              <button
-                type="button"
-                disabled
-                className="cursor-not-allowed rounded-2xl border border-slate-300 bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
-              >
-                Redeem (Coming Soon)
-              </button>
+              <div className="flex items-center gap-3">
+                <select 
+                  id="xp-convert-amount"
+                  className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none focus:border-brand-cyan/50 transition-all cursor-pointer"
+                  defaultValue="100"
+                >
+                  <option value="100" className="bg-[#020617] text-white">100 XP → 1 SP</option>
+                  <option value="500" className="bg-[#020617] text-white">500 XP → 5 SP</option>
+                  <option value="1000" className="bg-[#020617] text-white">1000 XP → 10 SP</option>
+                  <option value="5000" className="bg-[#020617] text-white">5000 XP → 50 SP</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const select = document.getElementById('xp-convert-amount');
+                    const amount = parseInt(select.value);
+                    if (state.xp < amount) {
+                      setFeedback({ type: 'error', message: 'Insufficient XP for this conversion.' });
+                      return;
+                    }
+                    setFeedback({ type: 'info', message: 'Processing conversion...' });
+                    const res = await actions.convertXPToRP(amount);
+                    if (res.success) {
+                      setFeedback({ type: 'success', message: `Successfully converted ${amount} XP to RP!` });
+                    }
+                  }}
+                  className="px-6 py-3 rounded-xl bg-brand-cyan text-bg-deep font-black text-sm hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(34,211,238,0.2)]"
+                >
+                  Convert Now
+                </button>
+              </div>
             </div>
           </div>
         </PanelShell>
@@ -673,15 +834,15 @@ export default function ProfileSettingsModule({
             <DashboardCard tone="danger">
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <p className="text-sm font-semibold text-red-700 dark:text-red-200">Delete Account</p>
-                  <p className="mt-1 text-sm text-red-600 dark:text-red-300">
+                  <p className="font-extrabold text-red-400">Delete Account</p>
+                  <p className="mt-1 text-xs text-white/40 font-medium leading-relaxed">
                     Remove your local DevSchool Pro profile, stored settings, and progress from this device.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setPendingDialog('delete-account')}
-                  className="interactive-chip inline-flex items-center justify-center gap-2 rounded-2xl border border-red-300 px-4 py-3 text-sm font-semibold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-200 dark:hover:bg-red-950/40"
+                  className="px-6 py-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 font-bold hover:bg-red-500/20 text-sm transition-all flex items-center justify-center gap-2"
                 >
                   <Trash2 size={16} />
                   <span>Delete Account</span>
@@ -707,13 +868,13 @@ export default function ProfileSettingsModule({
               />
             </DashboardCard>
             <DashboardCard>
-              <div className="flex items-start gap-3">
-                <span className="rounded-2xl bg-slate-100 p-3 text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                  <Bell size={18} />
+              <div className="flex items-start gap-4">
+                <span className="rounded-2xl bg-white/5 border border-white/10 p-3.5 text-brand-cyan flex-shrink-0">
+                  <Bell size={20} />
                 </span>
                 <div>
-                  <p className="font-semibold text-slate-900 dark:text-white">Reminder Schedule</p>
-                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                  <p className="font-extrabold text-white">Reminder Schedule</p>
+                  <p className="mt-1 text-xs text-white/40 font-medium leading-relaxed">
                     When enabled, DevSchool Pro sends a gentle browser reminder every few hours to help you stay consistent.
                   </p>
                 </div>
@@ -729,14 +890,14 @@ export default function ProfileSettingsModule({
         <PanelShell title="Support" description="">
           <div className="grid gap-5 lg:grid-cols-2">
             <DashboardCard>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">Help Center</p>
-              <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              <p className="font-extrabold text-white">Help Center</p>
+              <p className="mt-1 text-xs text-white/40 font-medium leading-relaxed">
                 Onboarding guides, FAQs, and learning tips can live here as the app grows.
               </p>
               <button
                 type="button"
                 onClick={() => setFeedback({ type: 'info', message: 'Help center placeholder is ready for future content.' })}
-                className="interactive-chip mt-5 inline-flex items-center gap-2 rounded-2xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800"
+                className="mt-6 px-5 py-3 rounded-xl bg-white/5 border border-white/10 text-xs font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all flex items-center gap-2"
               >
                 <CircleHelp size={16} />
                 <span>Open Help</span>
@@ -744,14 +905,14 @@ export default function ProfileSettingsModule({
             </DashboardCard>
 
             <DashboardCard>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">Contact Support</p>
-              <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              <p className="font-extrabold text-white">Contact Support</p>
+              <p className="mt-1 text-xs text-white/40 font-medium leading-relaxed">
                 Reach out for account help, technical support, or product feedback.
               </p>
               <button
                 type="button"
                 onClick={() => setFeedback({ type: 'info', message: 'Support placeholder: support@devschool.pro' })}
-                className="interactive-chip mt-5 inline-flex items-center gap-2 rounded-2xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800"
+                className="mt-6 px-5 py-3 rounded-xl bg-white/5 border border-white/10 text-xs font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all flex items-center gap-2"
               >
                 <CircleHelp size={16} />
                 <span>Contact</span>
@@ -770,15 +931,15 @@ export default function ProfileSettingsModule({
               <Link
                 key={document.slug}
                 to={`/settings/${document.slug}`}
-                className="interactive-card block rounded-[26px] border border-slate-200 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/70"
+                className="glass-card block rounded-3xl border border-white/5 bg-white/[0.02] p-6 hover:bg-white/[0.05] transition-all group"
               >
-                <div className="flex items-center gap-3">
-                  <span className="rounded-2xl bg-slate-100 p-3 text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                    <FileText size={18} />
+                <div className="flex items-start gap-4">
+                  <span className="rounded-2xl bg-white/5 border border-white/10 p-3.5 text-brand-cyan flex-shrink-0 group-hover:scale-110 transition-transform">
+                    <FileText size={20} />
                   </span>
                   <div>
-                    <p className="font-semibold text-slate-900 dark:text-white">{document.title}</p>
-                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{document.summary}</p>
+                    <p className="font-extrabold text-white group-hover:text-brand-cyan transition-colors">{document.title}</p>
+                    <p className="mt-1 text-xs text-white/40 font-medium leading-relaxed">{document.summary}</p>
                   </div>
                 </div>
               </Link>
@@ -809,6 +970,49 @@ export default function ProfileSettingsModule({
           />
         </div>
       </PanelShell>
+    )
+  }
+
+  if (standalone) {
+    return (
+      <div className="space-y-6">
+        <StickyPanelHeader
+          showBackButton={showBackButton}
+          onBack={handleBack}
+          title={selectedSection.title}
+          subtitle={compactCopy ? '' : pageIntro}
+        />
+        {feedback ? <InlineAlert type={feedback.type} message={feedback.message} className="mt-5" /> : null}
+        <div className="mt-5">{renderDynamicPanel()}</div>
+
+        <ConfirmDialog
+          open={pendingDialog === 'logout'}
+          title="Logout of DevSchool Pro?"
+          description="You will be signed out of this session and sent back to the login screen."
+          confirmLabel="Logout"
+          tone="warning"
+          onCancel={() => setPendingDialog(null)}
+          onConfirm={handleDialogConfirm}
+        />
+        <ConfirmDialog
+          open={pendingDialog === 'reset-progress'}
+          title="Reset your learning progress?"
+          description="This clears streak, points, XP, completed chapters, quiz history, and project completion for this device profile."
+          confirmLabel="Reset Progress"
+          tone="danger"
+          onCancel={() => setPendingDialog(null)}
+          onConfirm={handleDialogConfirm}
+        />
+        <ConfirmDialog
+          open={pendingDialog === 'delete-account'}
+          title="Delete local account data?"
+          description="This removes your stored profile, settings, and progress from this device and logs you out."
+          confirmLabel="Delete Account"
+          tone="danger"
+          onCancel={() => setPendingDialog(null)}
+          onConfirm={handleDialogConfirm}
+        />
+      </div>
     )
   }
 
@@ -1082,24 +1286,19 @@ function MobileSectionDrawer({ open, activeSection, onClose, onSelectSection }) 
 
 function StickyPanelHeader({ showBackButton, onBack, title, subtitle }) {
   return (
-    <div className="sticky top-0 z-20 rounded-[28px] border border-slate-200/80 bg-white/92 px-5 py-4 shadow-sm backdrop-blur-xl dark:border-slate-700 dark:bg-slate-950/88">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          {showBackButton ? (
-            <button
-              type="button"
-              onClick={onBack}
-              className="interactive-chip inline-flex items-center gap-2 rounded-2xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800"
-            >
-              <ArrowLeft size={16} />
-              <span>Back</span>
-            </button>
-          ) : null}
-          <div>
-            <p className="text-lg font-semibold text-slate-900 dark:text-white">{title}</p>
-            {subtitle ? <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p> : null}
-          </div>
-        </div>
+    <div className="flex items-center gap-4 mb-8">
+      {showBackButton && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-600 dark:text-white/60 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 transition-all"
+        >
+          <ArrowLeft size={20} />
+        </button>
+      )}
+      <div>
+        <h2 className="text-3xl font-black text-slate-900 dark:text-white">{title}</h2>
+        {subtitle ? <p className="text-sm text-slate-500 dark:text-white/40 font-semibold uppercase tracking-widest mt-1">{subtitle}</p> : null}
       </div>
     </div>
   )
@@ -1116,7 +1315,7 @@ function ProfileSummaryCard({
   compact = false,
 }) {
   return (
-    <div className="rounded-[30px] border border-slate-200/80 bg-white/95 p-5 shadow-[0_24px_48px_rgba(15,23,42,0.08)] dark:border-slate-700 dark:bg-slate-900/75">
+    <div className="rounded-[30px] border border-slate-200 dark:border-white/5 bg-white dark:bg-white/[0.02] p-5 shadow-[0_24px_48px_rgba(15,23,42,0.08)]">
       <div className="flex items-start justify-between gap-3">
         <div className="relative">
           {currentUser.avatar ? (
@@ -1127,7 +1326,7 @@ function ProfileSummaryCard({
             />
           ) : (
             <div
-              className={`${compact ? 'h-18 w-18 text-2xl' : 'h-20 w-20 text-3xl'} flex items-center justify-center rounded-[24px] bg-linear-to-br from-blue-600 via-indigo-500 to-cyan-400 font-bold text-white shadow-lg`}
+              className={`${compact ? 'h-18 w-18 text-2xl' : 'h-20 w-20 text-3xl'} flex items-center justify-center rounded-[24px] bg-gradient-to-br from-blue-600 via-indigo-500 to-cyan-400 font-bold text-white shadow-lg`}
             >
               {initials}
             </div>
@@ -1141,19 +1340,19 @@ function ProfileSummaryCard({
 
       <div className="mt-5">
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{currentUser.name || 'Learner'}</h2>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">@{currentUser.username || deriveFallbackUsername(currentUser)}</p>
+        <p className="mt-1 text-sm text-slate-500 dark:text-white/40">@{currentUser.username || deriveFallbackUsername(currentUser)}</p>
       </div>
 
       <div className="mt-5">
-        <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+        <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-white/40">
           <span>XP Progress</span>
           <span>
             {xpProgress.current}/{xpProgress.required}
           </span>
         </div>
-        <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+        <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-white/5 border border-slate-200 dark:border-white/5">
           <div
-            className="h-full rounded-full bg-linear-to-r from-blue-500 via-indigo-500 to-cyan-400"
+            className="h-full rounded-full bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400"
             style={{ width: `${Math.max(8, xpProgress.percent || 0)}%` }}
           />
         </div>
@@ -1168,7 +1367,7 @@ function ProfileSummaryCard({
       <button
         type="button"
         onClick={onViewProgress}
-        className="interactive-strong mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
+        className="px-6 py-3.5 rounded-2xl bg-brand-cyan text-bg-deep font-black text-sm hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(34,211,238,0.2)] mt-5 w-full flex items-center justify-center gap-2"
       >
         <Trophy size={16} />
         <span>View My Progress</span>
@@ -1179,9 +1378,9 @@ function ProfileSummaryCard({
 
 function ProfileStat({ label, value, icon: Icon }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-950/60">
+    <div className="rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] px-4 py-3">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">{label}</p>
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-white/30">{label}</p>
         <Icon size={15} className="text-amber-500" />
       </div>
       <p className="mt-2 text-xl font-bold text-slate-900 dark:text-white">{value}</p>
@@ -1191,12 +1390,12 @@ function ProfileStat({ label, value, icon: Icon }) {
 
 function PanelShell({ title, description, children }) {
   return (
-    <article className="rounded-[30px] border border-slate-200 bg-white/94 p-5 shadow-[0_24px_48px_rgba(15,23,42,0.08)] dark:border-slate-700 dark:bg-slate-900/78">
-      <div className="border-b border-slate-200/80 pb-4 dark:border-slate-800">
-        <h3 className="text-xl font-semibold text-slate-900 dark:text-white">{title}</h3>
-        {description ? <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{description}</p> : null}
+    <article className="glass-card p-8 rounded-[2.5rem] border border-white/5 bg-gradient-to-br from-white/[0.03] to-transparent">
+      <div className="border-b border-slate-200 dark:border-white/5 pb-4 mb-6">
+        <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-widest">{title}</h3>
+        {description ? <p className="mt-2 text-sm text-slate-500 dark:text-white/40 font-medium">{description}</p> : null}
       </div>
-      <div className="pt-5">{children}</div>
+      <div>{children}</div>
     </article>
   )
 }
@@ -1204,10 +1403,10 @@ function PanelShell({ title, description, children }) {
 function DashboardCard({ children, tone = 'default' }) {
   const toneClassName =
     tone === 'danger'
-      ? 'border-red-200 bg-red-50/85 dark:border-red-900/60 dark:bg-red-950/20'
-      : 'border-slate-200 bg-white/86 dark:border-slate-700 dark:bg-slate-950/45'
+      ? 'border-red-500/20 bg-red-500/5'
+      : 'border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]'
 
-  return <div className={`rounded-[26px] border p-5 shadow-sm ${toneClassName}`}>{children}</div>
+  return <div className={`rounded-[2rem] border p-6 ${toneClassName}`}>{children}</div>
 }
 
 function FormField({
@@ -1222,13 +1421,13 @@ function FormField({
   className = '',
   badge = null,
 }) {
-  const fieldClassName = `mt-3 w-full rounded-2xl border px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-400 dark:bg-slate-950/60 dark:text-white ${
-    error ? 'border-red-400 bg-red-50/70 dark:border-red-500 dark:bg-red-950/30' : 'border-slate-300 bg-white/92 dark:border-slate-700'
+  const fieldClassName = `mt-3 w-full rounded-2xl border px-6 py-4 text-sm text-slate-900 dark:text-white outline-none transition focus:border-brand-cyan/50 dark:focus:bg-white/10 bg-slate-50 dark:bg-white/5 ${
+    error ? 'border-red-500 bg-red-500/10' : 'border-slate-200 dark:border-white/10'
   }`
 
   return (
     <label className={`block ${className}`}>
-      <span className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-900 dark:text-white">
+      <span className="flex items-center justify-between gap-3 text-xs font-black uppercase tracking-widest text-slate-500 dark:text-white/30 pl-1">
         <span>
           {label}
           {required ? <span className="ml-1 text-red-500">*</span> : null}
@@ -1252,7 +1451,7 @@ function FormField({
           className={fieldClassName}
         />
       )}
-      {error ? <p className="mt-2 text-xs font-medium text-red-600 dark:text-red-300">{error}</p> : null}
+      {error ? <p className="mt-2 text-xs font-bold text-red-400 pl-1">{error}</p> : null}
     </label>
   )
 }
@@ -1260,13 +1459,13 @@ function FormField({
 function ToggleSetting({ icon: Icon, title, description, checked, onChange }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <div className="flex min-w-0 items-start gap-3">
-        <span className="rounded-2xl bg-slate-100 p-3 text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-          <Icon size={17} />
+      <div className="flex min-w-0 items-start gap-4">
+        <span className="rounded-2xl bg-white/5 border border-white/10 p-3.5 text-brand-cyan flex-shrink-0">
+          <Icon size={20} />
         </span>
         <div>
-          <p className="font-semibold text-slate-900 dark:text-white">{title}</p>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{description}</p>
+          <p className="font-extrabold text-slate-900 dark:text-white">{title}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-white/40 font-medium leading-relaxed">{description}</p>
         </div>
       </div>
 
@@ -1274,15 +1473,15 @@ function ToggleSetting({ icon: Icon, title, description, checked, onChange }) {
         type="button"
         aria-pressed={checked}
         onClick={onChange}
-        className={`interactive-chip relative inline-flex h-8 w-14 shrink-0 rounded-full border transition ${
+        className={`relative inline-flex h-8 w-14 shrink-0 rounded-full border transition-all ${
           checked
-            ? 'border-blue-500 bg-blue-600'
-            : 'border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800'
+            ? 'border-brand-cyan bg-brand-cyan shadow-[0_0_15px_rgba(34,211,238,0.3)]'
+            : 'border-white/10 bg-white/5'
         }`}
       >
         <span
-          className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow-sm transition ${
-            checked ? 'left-7' : 'left-1'
+          className={`absolute top-1 h-5 w-5 rounded-full transition-all ${
+            checked ? 'left-8 bg-[#020617]' : 'left-1 bg-white/30'
           }`}
         />
       </button>
@@ -1292,39 +1491,39 @@ function ToggleSetting({ icon: Icon, title, description, checked, onChange }) {
 
 function MetricCard({ label, value, icon: Icon }) {
   return (
-    <div className="rounded-[24px] border border-slate-200 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/50">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">{label}</p>
-        <Icon size={16} className="text-amber-500" />
+    <div className="glass-card p-6 rounded-3xl border border-white/5 bg-white/[0.02]">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-white/30">{label}</p>
+        <Icon size={18} className="text-brand-purple" />
       </div>
-      <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">{value}</p>
+      <p className="text-2xl font-black text-slate-900 dark:text-white">{value}</p>
     </div>
   )
 }
 
 function ActionCard({ icon: Icon, title, description, actionLabel, onClick, actionTone = 'warning' }) {
-  const toneClassName =
-    actionTone === 'danger'
-      ? 'border-red-300 text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-200 dark:hover:bg-red-950/40'
-      : 'border-amber-300 text-amber-800 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-200 dark:hover:bg-amber-950/30'
+  const isDanger = actionTone === 'danger'
+  const buttonStyle = isDanger
+    ? 'bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20'
+    : 'bg-white/5 border border-white/10 text-slate-900 dark:text-white hover:bg-white/10'
 
   return (
-    <div className="rounded-[26px] border border-slate-200 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-950/45">
-      <div className="flex items-start gap-3">
-        <span className="rounded-2xl bg-slate-100 p-3 text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-          <Icon size={18} />
+    <div className="glass-card p-6 rounded-3xl border border-white/5 bg-white/[0.02]">
+      <div className="flex items-start gap-4">
+        <span className="rounded-2xl bg-white/5 border border-white/10 p-3.5 text-slate-600 dark:text-white/60 flex-shrink-0">
+          <Icon size={20} />
         </span>
         <div>
-          <p className="font-semibold text-slate-900 dark:text-white">{title}</p>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{description}</p>
+          <p className="font-extrabold text-slate-900 dark:text-white">{title}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-white/40 font-medium leading-relaxed">{description}</p>
         </div>
       </div>
       <button
         type="button"
         onClick={onClick}
-        className={`interactive-chip mt-5 inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold ${toneClassName}`}
+        className={`mt-6 inline-flex items-center gap-2 rounded-xl px-5 py-3 text-xs font-black uppercase tracking-widest ${buttonStyle} transition-all`}
       >
-        <Icon size={16} />
+        <Icon size={14} />
         <span>{actionLabel}</span>
       </button>
     </div>
@@ -1334,28 +1533,28 @@ function ActionCard({ icon: Icon, title, description, actionLabel, onClick, acti
 function InlineAlert({ type = 'info', message, className = '' }) {
   const colorClassName =
     type === 'success'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200'
+      ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
       : type === 'error'
-        ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200'
-        : 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100'
+        ? 'border-red-500/20 bg-red-500/10 text-red-400'
+        : 'border-brand-cyan/20 bg-brand-cyan/10 text-brand-cyan'
 
-  return <div className={`rounded-2xl border px-4 py-3 text-sm font-medium ${colorClassName} ${className}`}>{message}</div>
+  return <div className={`rounded-2xl border px-6 py-4 text-sm font-bold ${colorClassName} ${className}`}>{message}</div>
 }
 
 function StatusBadge({ children, tone = 'neutral' }) {
   const toneClassName =
     tone === 'success'
-      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-200'
+      ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
       : tone === 'error'
-        ? 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-200'
+        ? 'bg-red-500/10 border border-red-500/20 text-red-400'
         : tone === 'brand'
-          ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-100'
+          ? 'bg-brand-cyan/10 border border-brand-cyan/20 text-brand-cyan'
           : tone === 'warning'
-            ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-200'
-            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100'
+            ? 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-400'
+            : 'bg-white/5 border border-white/10 text-white/40'
 
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${toneClassName}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${toneClassName}`}>
       {children}
     </span>
   )
@@ -1364,25 +1563,29 @@ function StatusBadge({ children, tone = 'neutral' }) {
 function ConfirmDialog({ open, title, description, confirmLabel, onConfirm, onCancel, tone = 'warning' }) {
   if (!open) return null
 
-  const buttonClassName = tone === 'danger' ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-500 text-slate-950 hover:bg-amber-400'
+  const isDanger = tone === 'danger'
+  const buttonClassName = isDanger 
+    ? 'bg-red-500 text-white hover:bg-red-600' 
+    : 'bg-brand-cyan text-bg-deep hover:shadow-lg hover:shadow-brand-cyan/20'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-[30px] border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-        <h4 className="text-xl font-semibold text-slate-900 dark:text-white">{title}</h4>
-        <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{description}</p>
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-bg-deep/80 p-4 backdrop-blur-md">
+      <div className="w-full max-w-md rounded-[2.5rem] border border-slate-200 dark:border-white/5 bg-white dark:bg-gradient-to-b dark:from-white/[0.05] dark:to-transparent p-10 shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-brand-cyan to-transparent" />
+        <h4 className="text-xl font-black text-slate-900 dark:text-white">{title}</h4>
+        <p className="mt-4 text-sm text-slate-500 dark:text-white/40 font-medium leading-relaxed">{description}</p>
+        <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-end">
           <button
             type="button"
             onClick={onCancel}
-            className="interactive-chip rounded-2xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800"
+            className="px-6 py-3.5 rounded-2xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white font-bold hover:bg-slate-200 dark:hover:bg-white/10 text-sm transition-all"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className={`interactive-strong rounded-2xl px-4 py-3 text-sm font-semibold text-white ${buttonClassName}`}
+            className={`px-6 py-3.5 rounded-2xl font-black text-sm transition-all ${buttonClassName}`}
           >
             {confirmLabel}
           </button>

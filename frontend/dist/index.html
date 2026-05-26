@@ -2,14 +2,115 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      (function() {
+        var sendLog = function(type, msg, extra) {
+          try {
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/log', true);
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.send(JSON.stringify({ type: type, message: msg, extra: extra || {} }));
+          } catch(e) {}
+        };
+
+        window.addEventListener('error', function(event) {
+          sendLog('window_error', event.message, { filename: event.filename, lineno: event.lineno, colno: event.colno });
+        });
+
+        window.addEventListener('unhandledrejection', function(event) {
+          var msg = event.reason ? (event.reason.message || event.reason.toString()) : 'Unhandled rejection';
+          var stack = event.reason && event.reason.stack ? event.reason.stack : '';
+          sendLog('promise_rejection', msg, { stack: stack });
+        });
+
+        var originalConsoleError = console.error;
+        console.error = function() {
+          var args = Array.prototype.slice.call(arguments);
+          originalConsoleError.apply(console, args);
+          sendLog('console_error', args.join(' '));
+        };
+      })();
+    </script>
+    <script>
+      (function() {
+        var mockStorage = function() {
+          var store = {};
+          return {
+            getItem: function(key) {
+              try {
+                var value = "; " + document.cookie;
+                var parts = value.split("; " + encodeURIComponent(key) + "=");
+                if (parts.length === 2) {
+                  return decodeURIComponent(parts.pop().split(";").shift());
+                }
+              } catch (e) {}
+              return store[key] || null;
+            },
+            setItem: function(key, value) {
+              try {
+                document.cookie = encodeURIComponent(key) + "=" + encodeURIComponent(value) + "; path=/; max-age=31536000; SameSite=Lax";
+              } catch (e) {}
+              store[key] = String(value);
+            },
+            removeItem: function(key) {
+              try {
+                document.cookie = encodeURIComponent(key) + "=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+              } catch (e) {}
+              delete store[key];
+            },
+            clear: function() {
+              for (var k in store) {
+                try {
+                  document.cookie = encodeURIComponent(k) + "=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+                } catch (e) {}
+                delete store[k];
+              }
+            },
+            key: function(index) { return Object.keys(store)[index] || null; },
+            get length() { return Object.keys(store).length; }
+          };
+        };
+
+        var isStorageAvailable = function(type) {
+          try {
+            var storage = window[type];
+            var x = '__storage_test__';
+            storage.setItem(x, x);
+            storage.removeItem(x);
+            return true;
+          } catch (e) {
+            return false;
+          }
+        };
+
+        if (!isStorageAvailable('localStorage')) {
+          try {
+            Object.defineProperty(window, 'localStorage', { value: mockStorage(), configurable: true, writable: true });
+            console.log('Early Polyfilled localStorage due to access restriction.');
+          } catch (err) {
+            console.warn('Failed to polyfill localStorage:', err);
+          }
+        }
+
+        if (!isStorageAvailable('sessionStorage')) {
+          try {
+            Object.defineProperty(window, 'sessionStorage', { value: mockStorage(), configurable: true, writable: true });
+            console.log('Early Polyfilled sessionStorage due to access restriction.');
+          } catch (err) {
+            console.warn('Failed to polyfill sessionStorage:', err);
+          }
+        }
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/devschool-icon.svg" />
     <link rel="apple-touch-icon" href="/devschool-icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#2563eb" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>DevSchool Pro</title>
-    <script type="module" crossorigin src="/assets/index-DwuSd_N1.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DymqJ5WV.css">
+    <script type="module" crossorigin src="/assets/index-CmaVvSrZ.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/createLucideIcon-BkE7qnuN.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-p7foCqpk.css">
   </head>
   <body>
     <div id="root"></div>

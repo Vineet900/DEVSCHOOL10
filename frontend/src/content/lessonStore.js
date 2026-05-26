@@ -1,106 +1,156 @@
-import { supabase } from '../lib/supabase'
+import { courseAPI } from '../lib/api'
 
 export let LESSONS = []
 export let COURSES = []
 
-const COURSE_TITLE = {
-  html: 'HTML',
-  css: 'CSS',
-  javascript: 'JavaScript',
+// ─── Category Detection ───────────────────────────────────────────────────────
+
+const COURSE_CATEGORIES = {
+  'html': 'Frontend', 'css': 'Frontend', 'javascript': 'Frontend',
+  'typescript': 'Frontend', 'react': 'Frontend', 'nextjs': 'Frontend',
+  'angular': 'Frontend', 'vuejs': 'Frontend', 'svelte': 'Frontend',
+  'redux': 'Frontend', 'zustand': 'Frontend', 'shadcn': 'Frontend',
+  'threejs': 'Frontend', 'gsap': 'Frontend', 'framer': 'Frontend',
+  'nodejs': 'Backend', 'express': 'Backend', 'postgresql': 'Backend',
+  'mysql': 'Backend', 'python': 'Backend', 'php': 'Backend',
+  'mongodb': 'Backend', 'redis': 'Backend', 'firebase': 'Backend',
+  'prisma': 'Backend', 'supabase': 'Backend', 'sqlite': 'Backend',
+  'backend': 'Backend', 'enterprise': 'Backend', 'database': 'Backend',
+  'git': 'DevOps', 'github': 'DevOps', 'aws': 'DevOps',
+  'devops': 'DevOps', 'docker': 'DevOps', 'kubernetes': 'DevOps',
+  'terraform': 'DevOps', 'nginx': 'DevOps', 'linux': 'DevOps',
+  'ci-cd': 'DevOps', 'jenkins': 'DevOps', 'ansible': 'DevOps',
+  'azure': 'DevOps', 'google-cloud': 'DevOps', 'cloud': 'DevOps',
+  'dsa': 'CS Fundamentals', 'java': 'CS Fundamentals',
+  'system-design': 'CS Fundamentals', 'competitive': 'CS Fundamentals',
+  'programming': 'CS Fundamentals', 'c': 'CS Fundamentals',
+  'cpp': 'CS Fundamentals', 'go': 'CS Fundamentals',
+  'rust': 'CS Fundamentals', 'kotlin': 'CS Fundamentals',
+  'swift': 'CS Fundamentals', 'ruby': 'CS Fundamentals',
+  'mobile': 'Mobile', 'flutter': 'Mobile', 'react-native': 'Mobile',
+  'android': 'Mobile', 'ios': 'Mobile',
+  'ai': 'AI & Data', 'cybersecurity': 'AI & Data', 'data': 'AI & Data',
 }
 
-const COURSE_DESCRIPTION = {
-  en: {
-    html: 'Learn modern semantic HTML with practical structure and accessibility.',
-    css: 'Master layout, responsive design, and scalable styling systems.',
-    javascript: 'Build interactive web apps with core and advanced JavaScript.',
-  },
-  hi: {
-    html: 'Modern semantic HTML ko practical structure aur accessibility ke saath sikhiye.',
-    css: 'Layout, responsive design aur scalable styling system me mastery hasil kariye.',
-    javascript: 'Core aur advanced JavaScript ke saath interactive web apps banaiye.',
-  },
-  hinglish: {
-    html: 'Modern semantic HTML ko practical structure aur accessibility ke saath seekho.',
-    css: 'Layout, responsive design, aur scalable styling system me strong bano.',
-    javascript: 'Core plus advanced JavaScript use karke interactive web apps build karo.',
-  },
+function getCourseCategory(slug) {
+  const cleanSlug = (slug || '').toLowerCase()
+  // Check exact match first
+  if (COURSE_CATEGORIES[cleanSlug]) return COURSE_CATEGORIES[cleanSlug]
+  // Check partial match
+  for (const [key, cat] of Object.entries(COURSE_CATEGORIES)) {
+    if (cleanSlug.includes(key)) return cat
+  }
+  return 'Other'
 }
 
+/**
+ * Normalize courses from DB API (sections → chapters flat array).
+ * Backend returns: courses[].sections[].lessons[]
+ * Frontend needs: courses[].chapters[] (flat array of all lessons)
+ */
+function normalizeDBCourses(coursesData) {
+  return coursesData.map(course => {
+    const sections = course.sections || []
+    const chapters = sections.flatMap(section =>
+      (section.lessons || []).map(lesson => ({
+        // Core fields
+        id: lesson.id,
+        title: lesson.title,
+        slug: lesson.slug || lesson.id,
+        content: lesson.content || '',
+        sort_order: lesson.sort_order ?? 0,
+        chapter_number: lesson.chapter_number ?? lesson.sort_order ?? 0,
+        xp_reward: lesson.xp_reward ?? 10,
+        duration: lesson.duration ?? 0,
+        video_url: lesson.video_url || null,
+
+        // Full original JSON data (theory, examples, practiceTasks, etc.)
+        ...((lesson.lesson_data && typeof lesson.lesson_data === 'object') ? lesson.lesson_data : {}),
+
+        // Metadata for UI
+        sectionTitle: section.title,
+        sectionId: section.id,
+        courseId: course.id,
+        category: getCourseCategory(course.slug || course.id),
+        estimatedTime: lesson.lesson_data?.estimatedTime || 
+          (lesson.duration ? `${Math.ceil(lesson.duration / 60)} min` : '10 min'),
+      }))
+    )
+
+    return {
+      id: course.id,
+      title: course.title,
+      description: course.description || '',
+      slug: course.slug || course.id,
+      thumbnail: course.thumbnail || null,
+      category: getCourseCategory(course.slug || course.id),
+      created_at: course.created_at,
+      chapters,
+      totalLessons: chapters.length,
+    }
+  })
+}
+
+// ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
+
+/**
+ * Initialize content: fetches from backend API
+ */
 export async function fetchContentFromDB() {
-  if (!supabase) return
-
   try {
-    const { data: lessons, error } = await supabase.from('lessons').select('*').order('chapter_number', { ascending: true })
-    if (error) {
-      console.error('Error fetching lessons:', error)
-      return
+    const { data: response } = await courseAPI.getCourses()
+    const coursesData = response?.data
+
+    const hasLessons = Array.isArray(coursesData) &&
+      coursesData.length > 0 &&
+      coursesData.some(c => 
+        ((c.sections || []).some(s => (s.lessons || []).length > 0))
+      )
+
+    if (hasLessons) {
+      const normalized = normalizeDBCourses(coursesData)
+      // Sort by title
+      COURSES = normalized.sort((a, b) => (a.title || '').localeCompare(b.title || ''))
+    } else {
+      console.info('[lessonStore] DB has no lessons.')
+      COURSES = []
     }
 
-    // Map database columns to app format
-    LESSONS = lessons.map(lesson => ({
-      id: lesson.slug,
-      slug: lesson.slug,
-      title: lesson.title,
-      category: lesson.course_id,
-      chapterNumber: lesson.chapter_number,
-      level: lesson.level || 'beginner',
-      estimatedTime: lesson.estimated_time || '10 min',
-      theory: typeof lesson.theory === 'string' ? JSON.parse(lesson.theory) : (lesson.theory || {}),
-      examples: typeof lesson.examples === 'string' ? JSON.parse(lesson.examples) : (lesson.examples || []),
-      exercises: typeof lesson.exercises === 'string' ? JSON.parse(lesson.exercises) : (lesson.exercises || []),
-      quiz: typeof lesson.quiz === 'string' ? JSON.parse(lesson.quiz) : (lesson.quiz || []),
-      summary: lesson.summary || ''
-    })).sort((a, b) => {
-      if (a.category === b.category) return a.chapterNumber - b.chapterNumber
-      return a.category.localeCompare(b.category)
-    })
-
-    const grouped = LESSONS.reduce((acc, lesson) => {
-      const key = lesson.category
-      if (!acc[key]) acc[key] = []
-      acc[key].push(lesson)
-      return acc
-    }, {})
-
-    COURSES = Object.entries(grouped)
-      .map(([id, chapters]) => ({
-        id,
-        slug: id,
-        category: 'Core',
-        title: { en: COURSE_TITLE[id] || id, hi: COURSE_TITLE[id] || id, hinglish: COURSE_TITLE[id] || id },
-        description: {
-          en: COURSE_DESCRIPTION.en[id] || '',
-          hi: COURSE_DESCRIPTION.hi[id] || '',
-          hinglish: COURSE_DESCRIPTION.hinglish[id] || '',
-        },
-        chapters: chapters.sort((a, b) => a.chapterNumber - b.chapterNumber),
+    // Build flat LESSONS array for search / quiz usage
+    LESSONS = COURSES.flatMap(course =>
+      (course.chapters || []).map(lesson => ({
+        ...lesson,
+        courseId: course.id,
       }))
-      .sort((a, b) => a.title.en.localeCompare(b.title.en))
+    )
 
+    return { LESSONS, COURSES, error: null }
   } catch (err) {
-    console.error('Failed to fetch content:', err)
+    console.error('Failed to sync content from API:', err)
+    COURSES = []
+    LESSONS = []
+    const errorMsg = err.response?.data?.message || err.message || 'Failed to connect to database'
+    return { LESSONS, COURSES, error: errorMsg }
   }
 }
-
-export const popularCourseIds = ['html', 'css', 'javascript']
 
 export function getCourses() {
   return COURSES
 }
 
 export function getCourseById(courseId) {
-  return COURSES.find((course) => course.id === courseId)
+  return COURSES.find((course) => course.id === courseId || course.slug === courseId)
 }
 
 export function getLesson(courseId, lessonSlug) {
-  return getCourseById(courseId)?.chapters.find((lesson) => lesson.slug === lessonSlug)
+  const course = getCourseById(courseId)
+  return course?.chapters.find((lesson) => lesson.slug === lessonSlug || lesson.id === lessonSlug)
 }
 
 export function getAdjacentLessons(courseId, lessonSlug) {
   const course = getCourseById(courseId)
   if (!course) return { prev: null, next: null }
-  const index = course.chapters.findIndex((lesson) => lesson.slug === lessonSlug)
+  const index = course.chapters.findIndex((lesson) => lesson.slug === lessonSlug || lesson.id === lessonSlug)
   if (index === -1) return { prev: null, next: null }
   return {
     prev: course.chapters[index - 1] || null,
@@ -108,47 +158,46 @@ export function getAdjacentLessons(courseId, lessonSlug) {
   }
 }
 
-function inferDifficulty(index, total) {
-  if (total <= 1) return 'medium'
-  const progress = index / (total - 1)
-  if (progress < 0.34) return 'low'
-  if (progress < 0.67) return 'medium'
-  return 'high'
-}
-
-export function searchLessons(query, language = 'english') {
+export function searchLessons(query, language = 'en') {
   const q = query.trim().toLowerCase()
   if (!q) return []
   return LESSONS.filter((lesson) => {
     const text = [
       lesson.title,
-      lesson.theory?.[language] || lesson.theory?.english || '',
+      lesson.content || '',
       lesson.summary || '',
+      lesson.sectionTitle || '',
     ]
       .join(' ')
       .toLowerCase()
     return text.includes(q)
   }).map((lesson) => ({
-    courseId: lesson.category,
-    courseTitle: COURSE_TITLE[lesson.category] || lesson.category,
-    chapterId: lesson.slug,
+    courseId: lesson.courseId,
+    chapterId: lesson.slug || lesson.id,
     chapterTitle: lesson.title,
+    sectionTitle: lesson.sectionTitle,
   }))
 }
 
 export function getCourseQuizzes() {
   const quizzes = {}
   for (const course of COURSES) {
-    quizzes[course.id] = course.chapters.flatMap((lesson, lessonIndex, lessons) =>
-      (lesson.quiz || []).map((q, index) => ({
-        id: `${lesson.id}-q${index + 1}`,
-        question: { en: q.question, hi: q.question, hinglish: q.question },
-        options: q.options,
-        answer: q.answer,
-        explanation: { en: q.explanation, hi: q.explanation, hinglish: q.explanation },
-        difficulty: inferDifficulty(lessonIndex, lessons.length),
-      })),
-    )
+    quizzes[course.id] = (course.chapters || []).flatMap((lesson, lessonIndex) => {
+      // quiz can come from lesson_data.interviewQuestions
+      const interviewQs = lesson.interviewQuestions || []
+      return interviewQs.map((q, index) => ({
+        id: `${lesson.id || lesson.slug}-q${index + 1}`,
+        question: typeof q === 'string'
+          ? { en: q, hi: q, hinglish: q }
+          : typeof q.question === 'object' ? q.question : { en: q.question || q, hi: q.question || q, hinglish: q.question || q },
+        options: q.options || [],
+        answer: typeof q.answer === 'number' ? q.answer : 0,
+        explanation: q.explanation
+          ? (typeof q.explanation === 'object' ? q.explanation : { en: q.explanation, hi: q.explanation, hinglish: q.explanation })
+          : { en: '', hi: '', hinglish: '' },
+        difficulty: lesson.difficulty || 'medium',
+      }))
+    })
   }
   return quizzes
 }

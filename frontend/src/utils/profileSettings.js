@@ -70,6 +70,10 @@ export function sanitizeProfileInput(profile = {}) {
       .trim()
       .slice(0, 240),
     avatar: String(profile.avatar || ''),
+    location: String(profile.location || '').trim(),
+    portfolio: String(profile.portfolio || '').trim(),
+    techStack: Array.isArray(profile.techStack) ? profile.techStack : [],
+    learningGoals: Array.isArray(profile.learningGoals) ? profile.learningGoals : [],
   }
 }
 

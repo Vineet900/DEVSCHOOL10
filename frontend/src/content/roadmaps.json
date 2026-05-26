@@ -1,0 +1,68 @@
+[
+  {
+    "id": "frontend",
+    "title": "Frontend Development",
+    "description": "Master the art of building beautiful, interactive user interfaces from scratch.",
+    "category": "Frontend",
+    "level": "Beginner to Advanced",
+    "duration": "6 Months",
+    "xp": 1200,
+    "icon": "Layout",
+    "steps": [
+      { "id": "html", "title": "HTML5", "description": "Semantic structure and accessibility.", "xp": 100 },
+      { "id": "css", "title": "Modern CSS", "description": "Flexbox, Grid, and Animations.", "xp": 150 },
+      { "id": "javascript", "title": "JavaScript Mastery", "description": "Core concepts to advanced patterns.", "xp": 250 },
+      { "id": "typescript", "title": "TypeScript Fundamentals", "description": "Static typing and type safety for JS applications.", "xp": 150 },
+      { "id": "react", "title": "React.js", "description": "Component-based architecture and hooks.", "xp": 300 },
+      { "id": "nextjs", "title": "Next.js", "description": "Server-side rendering and static generation.", "xp": 250 }
+    ]
+  },
+  {
+    "id": "backend",
+    "title": "Backend Development",
+    "description": "Build scalable APIs and manage databases for high-performance applications.",
+    "category": "Backend",
+    "level": "Intermediate",
+    "duration": "5 Months",
+    "xp": 1500,
+    "icon": "Server",
+    "steps": [
+      { "id": "nodejs", "title": "Node.js", "description": "Event-driven architecture and core modules.", "xp": 200 },
+      { "id": "express", "title": "Express.js", "description": "Middleware and routing for web apps.", "xp": 200 },
+      { "id": "postgresql", "title": "PostgreSQL", "description": "Relational data modeling and SQL.", "xp": 250 },
+      { "id": "mysql", "title": "MySQL Database", "description": "Structured Query Language & tables.", "xp": 250 },
+      { "id": "python", "title": "Python Backend", "description": "Building backend logic and services with Python.", "xp": 300 },
+      { "id": "php", "title": "PHP Web Development", "description": "Classic server-side scripting and web pages.", "xp": 300 }
+    ]
+  },
+  {
+    "id": "devops",
+    "title": "DevOps Engineering",
+    "description": "Automate deployments and manage cloud infrastructure at scale.",
+    "category": "DevOps",
+    "level": "Advanced",
+    "duration": "4 Months",
+    "xp": 1800,
+    "icon": "Cpu",
+    "steps": [
+      { "id": "git", "title": "Git Mastery", "description": "Version control and collaborative workflows.", "xp": 150 },
+      { "id": "github", "title": "GitHub Collaboration", "description": "Remote repositories and team collaboration.", "xp": 150 },
+      { "id": "aws", "title": "AWS Cloud", "description": "Cloud services and serverless compute.", "xp": 500 },
+      { "id": "devops", "title": "DevOps Fundamentals", "description": "CI/CD pipelines and deployment automation.", "xp": 400 }
+    ]
+  },
+  {
+    "id": "computerscience",
+    "title": "Computer Science & OOP",
+    "description": "Learn algorithmic thinking and object-oriented programming fundamentals.",
+    "category": "Core CS",
+    "level": "Beginner to Advanced",
+    "duration": "3 Months",
+    "xp": 1000,
+    "icon": "Zap",
+    "steps": [
+      { "id": "dsa", "title": "DSA Mastery", "description": "Data Structures, Algorithms and problem solving.", "xp": 500 },
+      { "id": "java", "title": "Java OOP", "description": "Object-oriented concepts and Java syntax.", "xp": 500 }
+    ]
+  }
+]

@@ -1,156 +1,270 @@
-import { useState, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings, Save, Image as ImageIcon, Globe, Shield, Bell, Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { 
+  Settings, 
+  Loader2, 
+  CheckCircle2, 
+  AlertCircle, 
+  ToggleLeft, 
+  ToggleRight, 
+  Palette, 
+  Mail, 
+  Database,
+  Cloud,
+  LayoutDashboard
+} from 'lucide-react'
 import { settingsService } from '../services/services'
 
 export default function AdminSettings() {
-  const queryClient = useQueryClient()
-  const [localSettings, setLocalSettings] = useState(null)
-  const [activeTab, setActiveTab] = useState('General')
+  const [successMsg, setSuccessMsg] = useState('')
+  const [errorMsg, setErrorMsg] = useState('')
 
   const { data: response, isLoading } = useQuery({
-    queryKey: ['appSettings'],
+    queryKey: ['adminSettings'],
     queryFn: settingsService.getSettings
   })
 
-  useEffect(() => {
-    if (response?.data) {
-      setLocalSettings(response.data)
-    }
-  }, [response])
-
-  const mutation = useMutation({
-    mutationFn: (newSettings) => settingsService.updateSettings(newSettings),
+  const saveMutation = useMutation({
+    mutationFn: (data) => settingsService.updateSettings(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['appSettings'] })
-      alert('Settings updated successfully!')
+      setSuccessMsg('Settings configuration updated successfully.')
+      setTimeout(() => setSuccessMsg(''), 5000)
     },
-    onError: (error) => {
-      alert('Failed to update settings: ' + error.message)
+    onError: (err) => {
+      setErrorMsg(err.message || 'Failed to sync settings.')
+      setTimeout(() => setErrorMsg(''), 5000)
     }
   })
 
-  const handleSave = () => {
-    mutation.mutate(localSettings)
+  const settings = response?.data || {
+    siteName: 'DevSchool Pro',
+    maintenanceMode: false,
+    registrationEnabled: true,
+    emailNotifications: true,
+    supportEmail: 'support@devschool.com',
+    aiTutorModel: 'gemini-3.5-flash',
+    geminiApiKey: ''
   }
 
-  if (isLoading || !localSettings) {
+  // Toggles state local
+  const [maintenanceMode, setMaintenanceMode] = useState(settings.maintenanceMode)
+  const [registrationEnabled, setRegistrationEnabled] = useState(settings.registrationEnabled)
+  const [emailNotifications, setEmailNotifications] = useState(settings.emailNotifications)
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    const data = Object.fromEntries(new FormData(e.currentTarget))
+    saveMutation.mutate({
+      ...settings,
+      siteName: data.siteName,
+      supportEmail: data.supportEmail,
+      aiTutorModel: data.aiTutorModel,
+      geminiApiKey: data.geminiApiKey,
+      maintenanceMode,
+      registrationEnabled,
+      emailNotifications
+    })
+  }
+
+  if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+      <div className="space-y-6 pb-12 animate-pulse">
+        <div className="h-8 w-64 bg-slate-800 rounded-lg"></div>
+        <div className="cyber-panel p-6 rounded-2xl h-80"></div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6 pb-12 max-w-4xl">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white">App Settings</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">Configure global application settings and branding.</p>
+    <div className="space-y-6 pb-12">
+      {/* Header */}
+      <header className="border-b border-cyan-500/10 pb-5">
+        <h1 className="text-2xl font-black text-slate-100 uppercase tracking-wider flex items-center gap-2">
+          <Settings className="text-[#00f0ff]" size={24} /> Configuration Control
+        </h1>
+        <p className="text-xs text-slate-400 mt-1 uppercase tracking-wider font-semibold">Alter platform meta configs, toggle maintenance lockdown, and review API registries</p>
       </header>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden dark:bg-slate-900 dark:border-slate-800">
-        <div className="flex border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
-          {['General', 'Branding', 'Security', 'Notifications'].map((tab) => (
-            <button 
-              key={tab} 
-              onClick={() => setActiveTab(tab)}
-              className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${
-                activeTab === tab 
-                  ? 'text-blue-600 border-b-2 border-blue-600 dark:text-blue-400 dark:border-blue-400' 
-                  : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                {tab === 'General' && <Settings size={16} />}
-                {tab === 'Branding' && <ImageIcon size={16} />}
-                {tab === 'Security' && <Shield size={16} />}
-                {tab === 'Notifications' && <Bell size={16} />}
-                {tab}
-              </div>
-            </button>
-          ))}
+      {successMsg && (
+        <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-450 rounded-xl flex items-center gap-3 text-xs font-bold uppercase tracking-wider">
+          <CheckCircle2 size={16} /> {successMsg}
         </div>
+      )}
 
-        <div className="p-6 space-y-8">
-          {activeTab === 'General' && (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-2">Site Name</label>
-                  <input 
-                    type="text" 
-                    value={localSettings.siteName}
-                    onChange={(e) => setLocalSettings({...localSettings, siteName: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-slate-800 dark:border-slate-700 dark:text-white transition-all" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-900 dark:text-white mb-2">Support Email</label>
-                  <input 
-                    type="email" 
-                    value={localSettings.supportEmail}
-                    onChange={(e) => setLocalSettings({...localSettings, supportEmail: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-slate-800 dark:border-slate-700 dark:text-white transition-all" 
-                  />
-                </div>
+      {errorMsg && (
+        <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl flex items-center gap-3 text-xs font-bold uppercase tracking-wider">
+          <AlertCircle size={16} /> {errorMsg}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Core settings & Branding */}
+        <div className="lg:col-span-2 space-y-6">
+          
+          {/* Main settings panel */}
+          <div className="cyber-panel p-6 rounded-2xl relative">
+            <div className="absolute top-0 left-6 h-1 w-20 bg-cyan-500"></div>
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-6 flex items-center gap-2">
+              <LayoutDashboard size={14} className="text-cyan-500" /> Platform Parameters
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[9px] uppercase tracking-widest font-black text-slate-500 mb-1">Site Branding Name</label>
+                <input 
+                  type="text" 
+                  name="siteName" 
+                  defaultValue={settings.siteName} 
+                  required 
+                  className="w-full px-3 py-2 cyber-input text-xs font-bold rounded-lg" 
+                />
               </div>
 
-              <div className="h-px bg-slate-100 dark:bg-slate-800" />
-
-              <div className="space-y-6">
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">System Controls</h3>
-                
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-sm font-semibold text-slate-900 dark:text-white">Maintenance Mode</h4>
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Disables access to the platform for all non-admin users.</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={localSettings.maintenanceMode} onChange={(e) => setLocalSettings({...localSettings, maintenanceMode: e.target.checked})} />
-                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-300 dark:peer-focus:ring-red-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-red-600"></div>
-                  </label>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-sm font-semibold text-slate-900 dark:text-white">Enable New Registrations</h4>
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Allow new users to sign up for accounts.</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={localSettings.registrationEnabled} onChange={(e) => setLocalSettings({...localSettings, registrationEnabled: e.target.checked})} />
-                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-blue-600"></div>
-                  </label>
-                </div>
+              <div>
+                <label className="block text-[9px] uppercase tracking-widest font-black text-slate-500 mb-1">AI Tutor Model Select</label>
+                <select 
+                  name="aiTutorModel" 
+                  defaultValue={settings.aiTutorModel} 
+                  className="w-full px-3 py-2 bg-[#080912] border border-cyan-500/20 text-xs font-bold uppercase rounded-lg text-slate-100 focus:border-cyan-500 focus:outline-none"
+                >
+                  <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                  <option value="gemini-3-flash">Gemini 3.0 Flash</option>
+                  <option value="gemini-3.1-flash-live-preview">Gemini 3.1 Flash Live</option>
+                  <option value="gemini-3.5-flash">Gemini 3.5 Flash (Recommended)</option>
+                  <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                </select>
               </div>
-            </>
-          )}
 
-          {activeTab !== 'General' && (
-            <div className="py-12 text-center text-slate-500 dark:text-slate-400">
-              <p>{activeTab} settings coming soon...</p>
+              <div>
+                <label className="block text-[9px] uppercase tracking-widest font-black text-slate-500 mb-1">Support Contact Email</label>
+                <input 
+                  type="email" 
+                  name="supportEmail" 
+                  defaultValue={settings.supportEmail} 
+                  required 
+                  className="w-full px-3 py-2 cyber-input text-xs font-bold rounded-lg" 
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-[9px] uppercase tracking-widest font-black text-slate-500 mb-1">Gemini API Key</label>
+                <input 
+                  type="text" 
+                  name="geminiApiKey" 
+                  defaultValue={settings.geminiApiKey || ''} 
+                  placeholder="AIzaSy..."
+                  className="w-full px-3 py-2 cyber-input text-xs font-bold rounded-lg" 
+                />
+              </div>
             </div>
-          )}
+
+            {/* Toggle options */}
+            <div className="space-y-4 border-t border-cyan-500/10 pt-5 mt-5">
+              
+              {/* Maintenance Toggle */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-200">System Maintenance Mode</h4>
+                  <p className="text-[9px] text-slate-500 uppercase font-semibold mt-0.5">Locks down client interface to visitors during updates</p>
+                </div>
+                <button 
+                  type="button" 
+                  onClick={() => setMaintenanceMode(!maintenanceMode)}
+                  className={`flex items-center gap-1 text-xs font-black uppercase ${maintenanceMode ? 'text-rose-500' : 'text-slate-500'}`}
+                >
+                  {maintenanceMode ? <ToggleRight size={28} className="text-rose-500" /> : <ToggleLeft size={28} />}
+                </button>
+              </div>
+
+              {/* Registration Toggle */}
+              <div className="flex items-center justify-between border-t border-slate-900 pt-4">
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-200">User Registrations</h4>
+                  <p className="text-[9px] text-slate-500 uppercase font-semibold mt-0.5">Toggles user creation capabilities on auth registry</p>
+                </div>
+                <button 
+                  type="button" 
+                  onClick={() => setRegistrationEnabled(!registrationEnabled)}
+                  className={`flex items-center gap-1 text-xs font-black uppercase ${registrationEnabled ? 'text-cyan-500' : 'text-slate-500'}`}
+                >
+                  {registrationEnabled ? <ToggleRight size={28} className="text-[#00f0ff]" /> : <ToggleLeft size={28} />}
+                </button>
+              </div>
+
+              {/* Email Notifications Toggle */}
+              <div className="flex items-center justify-between border-t border-slate-900 pt-4">
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-200">SMTP Notification Dispatches</h4>
+                  <p className="text-[9px] text-slate-500 uppercase font-semibold mt-0.5">Toggles transactional automated SMTP emails</p>
+                </div>
+                <button 
+                  type="button" 
+                  onClick={() => setEmailNotifications(!emailNotifications)}
+                  className={`flex items-center gap-1 text-xs font-black uppercase ${emailNotifications ? 'text-cyan-500' : 'text-slate-500'}`}
+                >
+                  {emailNotifications ? <ToggleRight size={28} className="text-[#00f0ff]" /> : <ToggleLeft size={28} />}
+                </button>
+              </div>
+
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button 
+              type="submit" 
+              disabled={saveMutation.isPending}
+              className="py-3 px-8 cyber-btn rounded-lg text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2"
+            >
+              {saveMutation.isPending && <Loader2 size={16} className="animate-spin" />}
+              Save Configuration Settings
+            </button>
+          </div>
         </div>
 
-        <div className="p-6 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 dark:border-slate-800 dark:bg-slate-800/50">
-          <button 
-            disabled={mutation.isPending}
-            className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors dark:text-slate-400 dark:hover:text-white"
-          >
-            Discard Changes
-          </button>
-          <button 
-            onClick={handleSave}
-            disabled={mutation.isPending}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 shadow-sm shadow-blue-500/20 disabled:opacity-50"
-          >
-            {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save size={16} />}
-            Save Changes
-          </button>
+        {/* Right side: Integrations & usage indicators */}
+        <div className="space-y-6">
+          
+          {/* Databases & Storage */}
+          <div className="cyber-panel p-6 rounded-2xl relative">
+            <div className="absolute top-0 right-4 w-4 h-4 border-t-2 border-r-2 border-cyan-500/20"></div>
+            
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-6 flex items-center gap-2">
+              <Database size={16} className="text-[#00f0ff]" /> Integration Registries
+            </h3>
+
+            <div className="space-y-4 text-xs font-medium">
+              <div className="bg-[#080912] p-3 rounded-lg border border-cyan-500/5">
+                <span className="text-[8px] uppercase tracking-widest text-slate-500 block font-bold">Supabase DB Status</span>
+                <span className="text-[10px] font-bold text-slate-200 mt-1 block flex items-center gap-1.5 uppercase">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></div>
+                  Connected (buuqxaialfecfwynnexp)
+                </span>
+              </div>
+
+              <div className="bg-[#080912] p-3 rounded-lg border border-cyan-500/5">
+                <span className="text-[8px] uppercase tracking-widest text-slate-500 block font-bold">Assets Storage Usage</span>
+                <span className="text-[10px] font-bold text-slate-200 mt-1 block flex items-center gap-1.5 uppercase">
+                  <Cloud size={12} className="text-cyan-400" />
+                  Cloudinary status: ACTIVE (12.4 GB / 25 GB)
+                </span>
+                <div className="h-1 bg-[#111322] rounded-full overflow-hidden mt-2">
+                  <div className="h-full bg-cyan-400" style={{ width: '49.6%' }}></div>
+                </div>
+              </div>
+
+              <div className="bg-[#080912] p-3 rounded-lg border border-cyan-500/5">
+                <span className="text-[8px] uppercase tracking-widest text-slate-500 block font-bold">Mail Gateway</span>
+                <span className="text-[10px] font-bold text-slate-200 mt-1 block flex items-center gap-1.5 uppercase">
+                  <Mail size={12} className="text-cyan-400" />
+                  SMTP Server: smtp.gmail.com (SSL)
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+
+      </form>
     </div>
   )
 }
-

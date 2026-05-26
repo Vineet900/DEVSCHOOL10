@@ -1,9 +1,27 @@
-import app from './app.js'
-import { env } from './config/env.js'
-import { refreshQuizBank } from './services/learningService.js'
+import app from './app.js';
+import { config } from './config/index.js';
+import { logger } from './utils/logger.js';
+import { initDbSchema } from './database/dbInit.js';
 
-refreshQuizBank()
+// Auto-run schema checks/migrations
+initDbSchema();
 
-app.listen(env.port, () => {
-  console.log(`Backend running on http://localhost:${env.port}`)
-})
+const server = app.listen(config.port, '0.0.0.0', () => {
+  logger.info(`🚀 Server running in ${config.env} mode on port ${config.port}`);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err) => {
+  logger.error(`Error: ${err.message}`);
+  // Close server & exit process
+  server.close(() => process.exit(1));
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received. Shutting down gracefully...');
+  server.close(() => {
+    logger.info('Process terminated.');
+    process.exit(0);
+  });
+});

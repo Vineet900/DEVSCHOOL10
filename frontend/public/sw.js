@@ -12,8 +12,11 @@ self.addEventListener('fetch', (event) => {
       return fetch(event.request)
         .then((response) => {
           if (event.request.method === 'GET' && response.status === 200) {
-            const copy = response.clone()
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
+            const url = new URL(event.request.url);
+            if (url.protocol.startsWith('http')) {
+              const copy = response.clone()
+              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
+            }
           }
           return response
         })

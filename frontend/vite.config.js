@@ -22,6 +22,20 @@ export default defineConfig(({ mode }) => {
     define: clientEnv,
     server: {
       port: 5173,
+      host: true,
+      strictPort: true,
+      hmr: {
+        host: 'localhost',
+        clientPort: 5173,
+        protocol: 'ws',
+      },
+      proxy: {
+        '/api': {
+          target: 'http://localhost:4000',
+          changeOrigin: true,
+          secure: false,
+        }
+      }
     },
   }
 })
