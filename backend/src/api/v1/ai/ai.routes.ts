@@ -174,7 +174,7 @@ router.post('/enhance-lesson', asyncHandler(async (req, res) => {
   const { lessonId } = req.body;
 
   if (!lessonId) {
-    return sendError(res, 'Lesson ID is required', 400);
+    return sendError(res, 'Lesson ID is required', { statusCode: 400 });
   }
 
   const customApiKey = req.headers['x-custom-api-key'] as string | undefined;
@@ -193,7 +193,7 @@ router.post('/enhance-lesson', asyncHandler(async (req, res) => {
     .maybeSingle();
 
   if (lessonErr || !lesson) {
-    return sendError(res, 'Lesson not found', 404);
+    return sendError(res, 'Lesson not found', { statusCode: 404 });
   }
 
   // Fetch course details
@@ -273,7 +273,7 @@ Return ONLY the JSON. Do not write any other text or markdown code blocks outsid
     .single();
 
   if (updateErr || !updated) {
-    return sendError(res, 'Failed to update lesson content in database', 500);
+    return sendError(res, 'Failed to update lesson content in database', { statusCode: 500 });
   }
 
   return sendSuccess(res, { lesson: updated, model: result.model });

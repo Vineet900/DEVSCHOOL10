@@ -83,13 +83,13 @@ router.get('/:id', optionalAuth, asyncHandler(async (req, res) => {
 
 // ─── GET /api/v1/courses/:id/sections/:sectionId/lessons ─
 router.get('/:id/sections/:sectionId/lessons', optionalAuth, asyncHandler(async (req, res) => {
-  const lessons = await courseRepository.findLessonsBySection(req.params['sectionId']!);
+  const lessons = await courseRepository.findLessonsBySection(req.params['sectionId'] as string);
   return sendSuccess(res, lessons);
 }));
 
 // ─── GET /api/v1/courses/lessons/:lessonId ────────────────
 router.get('/lessons/:lessonId', optionalAuth, asyncHandler(async (req, res) => {
-  const lesson = await courseRepository.findLessonById(req.params['lessonId']!);
+  const lesson = await courseRepository.findLessonById(req.params['lessonId'] as string);
 
   if (!lesson) throw new NotFoundError('Lesson');
 

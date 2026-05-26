@@ -9,7 +9,7 @@ dotenv.config();
 const envSchema = z.object({
   // Server
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.string().transform(Number).default('4000'),
+  PORT: z.coerce.number().default(4000),
 
   // Supabase
   SUPABASE_URL: z.string().url(),

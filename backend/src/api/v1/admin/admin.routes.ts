@@ -66,18 +66,18 @@ router.get('/users', validate(paginationSchema, 'query'), asyncHandler(async (re
 // FIX #2: Only whitelisted fields allowed — Zod strips everything else
 router.put('/users/:id', validate(updateUserSchema), asyncHandler(async (req, res) => {
   // req.body is now validated and stripped by Zod — no mass assignment possible
-  const data = await userRepository.updateProfile(req.params['id']!, req.body);
+  const data = await userRepository.updateProfile(req.params['id'] as string, req.body);
   return sendSuccess(res, data, { message: 'User updated' });
 }));
 
 router.put('/users/:id/ban', validate(banUserSchema), asyncHandler(async (req, res) => {
-  const data = await userRepository.banUser(req.params['id']!, req.body.banned);
+  const data = await userRepository.banUser(req.params['id'] as string, req.body.banned);
   return sendSuccess(res, data, { message: `User ${req.body.banned ? 'banned' : 'unbanned'}` });
 }));
 
 // Admin token refill — uses atomic RPC
 router.post('/users/:id/refill-tokens', validate(refillTokensSchema), asyncHandler(async (req, res) => {
-  const result = await tokenService.refillTokens(req.params['id']!, req.body.amount, req.user.id);
+  const result = await tokenService.refillTokens(req.params['id'] as string, req.body.amount, req.user.id);
   if (!result) return sendError(res, 'Failed to refill tokens', { statusCode: 400 });
   return sendSuccess(res, { success: true }, { message: 'Tokens refilled' });
 }));
@@ -99,12 +99,12 @@ router.post('/courses', validate(createCourseSchema), asyncHandler(async (req, r
 }));
 
 router.put('/courses/:id', validate(updateCourseSchema), asyncHandler(async (req, res) => {
-  const data = await courseRepository.update(req.params['id']!, req.body);
+  const data = await courseRepository.update(req.params['id'] as string, req.body);
   return sendSuccess(res, data, { message: 'Course updated' });
 }));
 
 router.delete('/courses/:id', asyncHandler(async (req, res) => {
-  await courseRepository.delete(req.params['id']!);
+  await courseRepository.delete(req.params['id'] as string);
   return sendSuccess(res, null, { message: 'Course deleted' });
 }));
 

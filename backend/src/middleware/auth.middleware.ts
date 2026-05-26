@@ -78,7 +78,7 @@ export const protect = async (
       oauthName: (meta['full_name'] as string) || (meta['name'] as string) || null,
       oauthAvatar: (meta['avatar_url'] as string) || (meta['picture'] as string) || null,
       isNewUser: !profile || !!profileError,
-      profile: profile ?? undefined,
+      profile: (profile as any) ?? undefined,
     };
 
     req.user = authenticatedUser;
