@@ -1,9 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import morgan from 'morgan';
+import pinoHttp from 'pino-http';
 import cookieParser from 'cookie-parser';
 import hpp from 'hpp';
+import compression from 'compression';
 
 import { config } from './config/index.js';
 import { logger } from './lib/logger.js';
@@ -23,6 +24,9 @@ import certificateRoutes from './api/v1/certificates/certificates.routes.js';
 import uploadRoutes from './api/v1/uploads/uploads.routes.js';
 
 const app = express();
+
+// ─── Compression Middleware ───────────────────────────────
+app.use(compression());
 
 // ─── Security Middleware ──────────────────────────────────
 app.use(helmet({
@@ -57,18 +61,26 @@ app.use(cookieParser());
 app.use(hpp());
 
 // ─── Request Logging ──────────────────────────────────────
-app.use(morgan(
-  config.isProd
-    ? ':remote-addr ":method :url" :status :res[content-length] - :response-time ms'
-    : 'dev',
-  {
-    stream: {
-      write: (message: string) => logger.info(message.trim()),
-    },
-    // Don't log health checks
-    skip: (req) => req.url === '/health',
+// ─── Request Logging ──────────────────────────────────────
+const pinoMiddleware = (pinoHttp as any)({
+  logger: logger.pinoLogger,
+  // Don't log health checks
+  autoLogging: {
+    ignore: (req: any) => req.url === '/health'
+  },
+  serializers: {
+    req: (req: any) => ({
+      id: req.id,
+      method: req.method,
+      url: req.url,
+      ip: req.remoteAddress
+    }),
+    res: (res: any) => ({
+      statusCode: res.statusCode,
+    })
   }
-));
+});
+app.use(pinoMiddleware);
 
 // ─── Global Rate Limiter (Safety Net) ─────────────────────
 app.use(generalLimiter);
@@ -102,6 +114,11 @@ app.use('/api/auth', authRoutes);
 app.use('/api/courses', courseRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/admin', adminRoutes);
+
+// ─── Dummy Log Handler ──────────────────────────────────────
+app.post('/api/log', (req, res) => {
+  res.status(200).send('OK');
+});
 
 // ─── 404 Handler ──────────────────────────────────────────
 app.use((_req, res) => {

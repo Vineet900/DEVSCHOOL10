@@ -1,64 +1,37 @@
-import winston from 'winston';
+import pino from 'pino';
 import { config } from '../config/index.js';
 
-// ─── Structured Logger ────────────────────────────────────────────────────────
-// Uses JSON format in production (CloudWatch/Datadog compatible).
-// Human-readable colorized format in development.
-// File transports are intentionally removed for production — use
-// log aggregation (CloudWatch, Datadog, Loki) instead of ephemeral files.
+const isDev = config.env === 'development';
 
-const { combine, timestamp, json, colorize, printf, errors } = winston.format;
-
-const devFormat = combine(
-  colorize({ all: true }),
-  timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-  errors({ stack: true }),
-  printf(({ level, message, timestamp, requestId, ...meta }) => {
-    const rid = requestId ? ` [${String(requestId)}]` : '';
-    const extra = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';
-    return `${String(timestamp)} ${level}${rid}: ${String(message)}${extra}`;
-  })
-);
-
-const prodFormat = combine(
-  timestamp(),
-  errors({ stack: true }),
-  json()
-);
-
-// In production, log only warnings and errors.
-// In development, log everything including debug.
-const logLevel = config.isProd ? 'warn' : 'debug';
-
-const transports: winston.transport[] = [
-  new winston.transports.Console({
-    format: config.isProd ? prodFormat : devFormat,
+const baseLogger = pino({
+  level: process.env.LOG_LEVEL || (isDev ? 'debug' : 'info'),
+  timestamp: pino.stdTimeFunctions.isoTime,
+  base: {
+    env: config.env,
+    service: 'devschool-backend',
+  },
+  ...(isDev && {
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'SYS:standard',
+        ignore: 'pid,hostname,env,service',
+      },
+    },
   }),
-];
-
-// Only write files in development — production uses stdout aggregation
-if (config.isDev) {
-  transports.push(
-    new winston.transports.File({
-      filename: 'logs/error.log',
-      level: 'error',
-      format: prodFormat,
-    }),
-    new winston.transports.File({
-      filename: 'logs/combined.log',
-      format: prodFormat,
-    })
-  );
-}
-
-export const logger = winston.createLogger({
-  level: logLevel,
-  transports,
-  // Never log unhandled exceptions to console in prod — use process.on handlers
-  exitOnError: false,
+  redact: {
+    paths: ['req.headers.authorization', 'req.headers["x-custom-api-key"]', 'body.password', 'body.token'],
+    censor: '***REDACTED***',
+  },
 });
 
-// ─── Child logger factory ─────────────────────────────────────────────────────
-// Create a child logger with a request ID for per-request correlation.
-export const createRequestLogger = (requestId: string) =>
-  logger.child({ requestId });
+// Wrapper to make Pino compatible with existing Winston-style calls: logger.error('msg', { meta })
+export const logger = {
+  info: (msg: string, meta?: any) => meta ? baseLogger.info(meta, msg) : baseLogger.info(msg),
+  error: (msg: string, meta?: any) => meta ? baseLogger.error(meta, msg) : baseLogger.error(msg),
+  warn: (msg: string, meta?: any) => meta ? baseLogger.warn(meta, msg) : baseLogger.warn(msg),
+  debug: (msg: string, meta?: any) => meta ? baseLogger.debug(meta, msg) : baseLogger.debug(msg),
+  // For pino-http support, expose the base logger
+  pinoLogger: baseLogger,
+};

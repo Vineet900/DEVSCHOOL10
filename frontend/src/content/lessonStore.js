@@ -47,13 +47,17 @@ function getCourseCategory(slug) {
  * Normalize courses from DB API (sections → chapters flat array).
  * Backend returns: courses[].sections[].lessons[]
  * Frontend needs: courses[].chapters[] (flat array of all lessons)
+ *
+ * PERFORMANCE NOTE: The catalog endpoint no longer returns lesson_data
+ * (heavy AI-generated content). It is lazy-loaded when the user opens
+ * a specific chapter. Chapters are still created here with metadata only.
  */
 function normalizeDBCourses(coursesData) {
   return coursesData.map(course => {
     const sections = course.sections || []
     const chapters = sections.flatMap(section =>
       (section.lessons || []).map(lesson => ({
-        // Core fields
+        // Core fields (always present from catalog)
         id: lesson.id,
         title: lesson.title,
         slug: lesson.slug || lesson.id,
@@ -64,7 +68,7 @@ function normalizeDBCourses(coursesData) {
         duration: lesson.duration ?? 0,
         video_url: lesson.video_url || null,
 
-        // Full original JSON data (theory, examples, practiceTasks, etc.)
+        // lesson_data is lazy-loaded — spread it if already present
         ...((lesson.lesson_data && typeof lesson.lesson_data === 'object') ? lesson.lesson_data : {}),
 
         // Metadata for UI
@@ -74,6 +78,9 @@ function normalizeDBCourses(coursesData) {
         category: getCourseCategory(course.slug || course.id),
         estimatedTime: lesson.lesson_data?.estimatedTime || 
           (lesson.duration ? `${Math.ceil(lesson.duration / 60)} min` : '10 min'),
+        
+        // Flag: content not yet loaded
+        _contentLoaded: !!(lesson.lesson_data),
       }))
     )
 
@@ -145,6 +152,48 @@ export function getCourseById(courseId) {
 export function getLesson(courseId, lessonSlug) {
   const course = getCourseById(courseId)
   return course?.chapters.find((lesson) => lesson.slug === lessonSlug || lesson.id === lessonSlug)
+}
+
+/**
+ * Lazy-load full lesson content (theory, examples, etc.) from backend.
+ * Called when user navigates to a specific chapter.
+ * Returns the enriched lesson object after merging lesson_data into the store.
+ */
+export async function loadLessonContent(courseId, lessonSlug) {
+  const course = getCourseById(courseId)
+  if (!course) return null
+
+  const lessonIndex = course.chapters.findIndex(
+    (l) => l.slug === lessonSlug || l.id === lessonSlug
+  )
+  if (lessonIndex === -1) return null
+
+  const lesson = course.chapters[lessonIndex]
+
+  // Already loaded — return cached
+  if (lesson._contentLoaded) return lesson
+
+  try {
+    const { data: response } = await courseAPI.getLesson(lesson.id)
+    const fullLesson = response?.data
+
+    if (fullLesson?.lesson_data && typeof fullLesson.lesson_data === 'object') {
+      // Merge lesson_data into existing chapter in-place
+      const enriched = {
+        ...lesson,
+        content: fullLesson.content || lesson.content,
+        ...fullLesson.lesson_data,
+        estimatedTime: fullLesson.lesson_data.estimatedTime || lesson.estimatedTime,
+        _contentLoaded: true,
+      }
+      course.chapters[lessonIndex] = enriched
+      return enriched
+    }
+  } catch (err) {
+    console.warn('[lessonStore] Failed to lazy-load lesson content:', err)
+  }
+
+  return lesson
 }
 
 export function getAdjacentLessons(courseId, lessonSlug) {

@@ -1,20 +1,37 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../../utils/asyncHandler.js';
 import { protect } from '../../../middleware/auth.middleware.js';
+import { authorize } from '../../../middleware/rbac.middleware.js';
 import { validate } from '../../../middleware/validate.middleware.js';
 import { aiLimiter } from '../../../middleware/rateLimiter.middleware.js';
 import { sendSuccess, sendError } from '../../../utils/apiResponse.js';
 import { askTeacherSchema, generateQuizSchema, generateRoadmapSchema } from '../../../validators/ai.validator.js';
 import { tokenService } from '../../../services/ai/token.service.js';
 import { geminiService } from '../../../services/ai/gemini.service.js';
-import { InsufficientTokensError } from '../../../utils/errors.js';
+import { InsufficientTokensError, ForbiddenError } from '../../../utils/errors.js';
 import { supabase } from '../../../lib/supabase.js';
+import { logger } from '../../../lib/logger.js';
+import { aiFastQueue, aiSlowQueue } from '../../../queues/ai.queue.js';
 
 const router = Router();
 
 // All AI routes require authentication + rate limiting
 router.use(protect);
 router.use(aiLimiter);
+
+// ─── SECURITY: Strip x-custom-api-key for non-admin users ──────────────────
+// Prevents header spoofing: only ADMIN users may supply their own API key
+// to bypass token deduction. Regular students ALWAYS consume tokens.
+router.use((req, _res, next) => {
+  if (req.user?.role !== 'ADMIN' && req.headers['x-custom-api-key']) {
+    logger.warn('[AI] Non-admin tried to use x-custom-api-key header', {
+      userId: req.user?.id,
+      requestId: req.requestId,
+    });
+    delete req.headers['x-custom-api-key'];
+  }
+  next();
+});
 
 // ─── POST /api/v1/ai/chat — AI Teacher ───────────────────
 // FIX #5: userId ALWAYS from JWT (no IDOR)
@@ -122,44 +139,21 @@ router.post('/generate-roadmap', validate(generateRoadmapSchema), asyncHandler(a
   const customApiKey = req.headers['x-custom-api-key'] as string | undefined;
   const bypassTokens = !!customApiKey;
 
+  // FIX: Deduct tokens synchronously before enqueuing to prevent race conditions
   if (!bypassTokens) {
     const tokenResult = await tokenService.deductToken(userId);
     if (!tokenResult.success) throw new InsufficientTokensError();
   }
 
-  const prompt = `Create a detailed learning roadmap for: "${goal}"
-Current level: ${currentLevel}
-Timeframe: ${timeframe}
+  // Enqueue job to FAST queue
+  const job = await aiFastQueue.add('generate-roadmap', {
+    userId,
+    type: 'generate-roadmap',
+    payload: { goal, currentLevel, timeframe, language },
+    customApiKey,
+  });
 
-Return valid JSON:
-{
-  "title": "Roadmap Title",
-  "weeks": [{
-    "week": 1,
-    "topic": "Topic name",
-    "tasks": ["Task 1", "Task 2"],
-    "resources": ["Resource 1"]
-  }]
-}
-
-Language: ${language === 'hi' ? 'Hindi' : 'English'}.
-Only return the JSON, no other text.`;
-
-  const result = await geminiService.generate({ prompt, customApiKey });
-  const roadmap = geminiService.extractJson(result.text);
-
-  // Save roadmap to DB
-  const { data: saved } = await supabase
-    .from('user_roadmaps')
-    .insert({
-      user_id: userId,
-      title: goal,
-      content: roadmap,
-    })
-    .select()
-    .single();
-
-  return sendSuccess(res, { roadmap: saved, model: result.model }, { statusCode: 201 });
+  return sendSuccess(res, { jobId: job.id, message: 'Roadmap generation started' }, { statusCode: 202 });
 }));
 
 // ─── GET /api/v1/ai/tokens — Get token balance ───────────
@@ -169,7 +163,8 @@ router.get('/tokens', asyncHandler(async (req, res) => {
 }));
 
 // ─── POST /api/v1/ai/enhance-lesson — AI Lesson Enhancer ───
-router.post('/enhance-lesson', asyncHandler(async (req, res) => {
+// SECURITY FIX: ADMIN ONLY — students must never overwrite course content
+router.post('/enhance-lesson', authorize('ADMIN'), asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const { lessonId } = req.body;
 
@@ -178,14 +173,8 @@ router.post('/enhance-lesson', asyncHandler(async (req, res) => {
   }
 
   const customApiKey = req.headers['x-custom-api-key'] as string | undefined;
-  const bypassTokens = !!customApiKey;
-
-  if (!bypassTokens) {
-    const tokenResult = await tokenService.deductToken(userId);
-    if (!tokenResult.success) throw new InsufficientTokensError();
-  }
-
-  // Fetch current lesson
+  
+  // Fetch current lesson to ensure it exists
   const { data: lesson, error: lessonErr } = await supabase
     .from('lessons')
     .select('*')
@@ -196,87 +185,46 @@ router.post('/enhance-lesson', asyncHandler(async (req, res) => {
     return sendError(res, 'Lesson not found', { statusCode: 404 });
   }
 
-  // Fetch course details
-  const { data: course } = await supabase
-    .from('courses')
-    .select('title')
-    .eq('id', lesson.course_id)
-    .maybeSingle();
-
-  const courseTitle = course?.title || 'this course';
-
-  const prompt = `You are a world-class educational content creator for DevSchool Pro.
-Enhance the coding lesson named "${lesson.title}" in the course "${courseTitle}".
-
-Write an EXHAUSTIVE, deep, highly technical, and completely comprehensive textbook chapter for this lesson.
-The content must be fully real, extremely educational, contain solid production code examples, and not use any placeholder text.
-
-Return valid JSON matching the following structure:
-{
-  "title": "${lesson.title}",
-  "chapterOverview": "A thorough, high-level overview explaining what this chapter is about.",
-  "whyThisMatters": "A powerful explanation of why this topic is essential for software engineers.",
-  "learningObjectives": ["Objective 1", "Objective 2", "Objective 3"],
-  "theory": [
-    {
-      "topic": "First Core Concept",
-      "deepExplanation": "Exhaustively detailed explanation of this topic with professional and deep technical analysis.",
-      "beginnerAnalogy": "A simple, friendly, and memorable analogy explaining this concept to beginners.",
-      "realWorldUsage": "How this concept is applied in production applications.",
-      "industryUsage": "Specific systems, companies, or tools that rely on this concept.",
-      "bestPractices": ["Best practice 1", "Best practice 2"],
-      "commonMistakes": ["Common mistake 1", "Common mistake 2"],
-      "optimizationTips": ["Performance tip 1"],
-      "securityTips": ["Security tip 1"],
-      "architectureNotes": ["System architecture design note"]
-    }
-  ],
-  "examples": [
-    {
-      "title": "Production-Ready Implementation",
-      "code": "Write full, real, working code (JavaScript, Python, SQL, etc., matching the tech of the course). Avoid short dummy examples.",
-      "expectedOutput": "Show the exact execution console output.",
-      "lineByLineExplanation": ["Line 1 explanation", "Line 2 explanation"],
-      "realWorldExplanation": "Explain how this code functions in a real-world enterprise system."
-    }
-  ],
-  "miniProjects": [
-    {
-      "title": "Interactive Builder Project",
-      "description": "A clear, actionable prompt to build a small real-world tool using these concepts.",
-      "features": ["Feature 1", "Feature 2", "Feature 3"]
-    }
-  ],
-  "practiceProblems": {
-    "easy": ["Challenge 1", "Challenge 2"],
-    "medium": ["Challenge 3", "Challenge 4"],
-    "hard": ["Challenge 5"]
-  },
-  "revisionNotes": ["Revision note 1", "Revision note 2"],
-  "chapterSummary": "A powerful concluding summary for the chapter."
-}
-
-Return ONLY the JSON. Do not write any other text or markdown code blocks outside of the JSON. Make sure the JSON is perfectly valid and all double-quotes are escaped correctly inside strings.`;
-
-  const result = await geminiService.generate({ prompt, customApiKey });
-  const enhancedJson = geminiService.extractJson(result.text);
-
-  // Update in database
-  const { data: updated, error: updateErr } = await supabase
-    .from('lessons')
-    .update({
-      content: (enhancedJson as any).chapterOverview || lesson.content,
-      lesson_data: enhancedJson,
-    })
-    .eq('id', lessonId)
-    .select()
-    .single();
-
-  if (updateErr || !updated) {
-    return sendError(res, 'Failed to update lesson content in database', { statusCode: 500 });
+  // FIX: Deduct tokens synchronously before enqueuing
+  if (!customApiKey) {
+    const tokenResult = await tokenService.deductToken(userId);
+    if (!tokenResult.success) throw new InsufficientTokensError();
   }
 
-  return sendSuccess(res, { lesson: updated, model: result.model });
+  // Enqueue job to SLOW queue
+  const job = await aiSlowQueue.add('enhance-lesson', {
+    userId,
+    type: 'enhance-lesson',
+    payload: { content: lesson.content, level: 1, lessonId }, // pass necessary data
+    customApiKey,
+  });
+
+  return sendSuccess(res, { jobId: job.id, message: 'Lesson enhancement started' }, { statusCode: 202 });
+}));
+
+// ─── GET /api/v1/ai/jobs/:jobId — Check Job Status ─────────
+router.get('/jobs/:jobId', asyncHandler(async (req, res) => {
+  const jobId = req.params.jobId as string;
+  let job = await aiFastQueue.getJob(jobId);
+  
+  if (!job) {
+    job = await aiSlowQueue.getJob(jobId);
+  }
+
+  if (!job) {
+    return sendError(res, 'Job not found', { statusCode: 404 });
+  }
+
+  const state = await job.getState();
+  const result = job.returnvalue;
+  const error = job.failedReason;
+
+  return sendSuccess(res, {
+    id: job.id,
+    state,
+    result: state === 'completed' ? result : null,
+    error: state === 'failed' ? error : null,
+  });
 }));
 
 export default router;

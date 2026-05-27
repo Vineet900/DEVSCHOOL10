@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../../utils/asyncHandler.js';
 import { protect, optionalAuth } from '../../../middleware/auth.middleware.js';
+import { cacheResponse } from '../../../middleware/cache.middleware.js';
 import { validate } from '../../../middleware/validate.middleware.js';
 import { sendSuccess } from '../../../utils/apiResponse.js';
 import { courseRepository } from '../../../repositories/course.repository.js';
@@ -11,10 +12,9 @@ import { supabase } from '../../../lib/supabase.js';
 
 const router = Router();
 
-// ─── GET /api/v1/courses — Full courses with nested sections + lessons ──
-// Frontend needs: courses[].sections[].lessons[] for the lessonStore
-router.get('/', optionalAuth, asyncHandler(async (_req, res) => {
-  // Fetch all published courses with sections and lessons nested
+// ─── GET /api/v1/courses — Catalog (lightweight, no lesson_data) ──
+// PERFORMANCE FIX: Cached in Redis for 5 minutes (300s)
+router.get('/', optionalAuth, cacheResponse(300, 'courses'), asyncHandler(async (_req, res) => {
   const { data: courses, error } = await supabase
     .from('courses')
     .select(`
@@ -22,8 +22,8 @@ router.get('/', optionalAuth, asyncHandler(async (_req, res) => {
       sections (
         id, title, sort_order,
         lessons (
-          id, title, content, slug, sort_order, chapter_number,
-          xp_reward, duration, video_url, lesson_data
+          id, title, slug, sort_order, chapter_number,
+          xp_reward, duration, video_url
         )
       )
     `)
@@ -88,9 +88,16 @@ router.get('/:id/sections/:sectionId/lessons', optionalAuth, asyncHandler(async 
 }));
 
 // ─── GET /api/v1/courses/lessons/:lessonId ────────────────
-router.get('/lessons/:lessonId', optionalAuth, asyncHandler(async (req, res) => {
-  const lesson = await courseRepository.findLessonById(req.params['lessonId'] as string);
+// This is the ONLY endpoint that returns lesson_data (heavy content).
+// Cached in Redis for 5 minutes to prevent OOM via repetitive fetching.
+router.get('/lessons/:lessonId', optionalAuth, cacheResponse(300, 'lessons'), asyncHandler(async (req, res) => {
+  const { data: lesson, error } = await supabase
+    .from('lessons')
+    .select('id, title, content, slug, sort_order, chapter_number, xp_reward, duration, video_url, lesson_data, section_id')
+    .eq('id', req.params['lessonId'] as string)
+    .maybeSingle();
 
+  if (error) throw error;
   if (!lesson) throw new NotFoundError('Lesson');
 
   return sendSuccess(res, lesson);

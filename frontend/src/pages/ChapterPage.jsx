@@ -39,7 +39,7 @@ import {
 import toast from 'react-hot-toast'
 import CourseLogo from '../components/CourseLogo'
 import { useApp } from '../context/AppContext'
-import { getAdjacentLessons, getCourseById, getLesson, COURSES } from '../content/lessonStore'
+import { getAdjacentLessons, getCourseById, getLesson, loadLessonContent, COURSES } from '../content/lessonStore'
 import { t } from '../data/i18n'
 import { courseAPI, teacherAPI, progressAPI } from '../lib/api'
 
@@ -133,13 +133,11 @@ export default function ChapterPage() {
 
   useEffect(() => {
     if (!course || !dbLesson) return
-    if (state.selectedCourseId === course.id && state.selectedChapterId === dbLesson.slug) return
+    if (state.selectedCourseId === course?.id && state.selectedChapterId === dbLesson?.slug) return
     actions.selectChapter(course.id, dbLesson.slug)
   }, [actions, course, dbLesson, state.selectedCourseId, state.selectedChapterId])
 
-  if (!course || !dbLesson) return <Navigate to="/courses" replace />
-
-  const courseMeta = useMemo(() => getCourseMeta(course.slug), [course.slug])
+  const courseMeta = useMemo(() => getCourseMeta(course?.slug), [course?.slug])
   const Icon = courseMeta.icon
 
   const [localLesson, setLocalLesson] = useState(dbLesson)
@@ -148,13 +146,38 @@ export default function ChapterPage() {
   // Update localLesson if chapterId/dbLesson changes
   useEffect(() => {
     setLocalLesson(dbLesson)
-  }, [dbLesson])
+    // Lazy-load full lesson_data (theory, examples, etc.) from backend
+    if (course && dbLesson && !dbLesson._contentLoaded) {
+      loadLessonContent(courseId, chapterId).then((enriched) => {
+        if (enriched) setLocalLesson(enriched)
+      })
+    }
+  }, [dbLesson, course, courseId, chapterId])
+
+  const allChapters = useMemo(() => {
+    if (!course || !dbLesson) return []
+    const sectionId = dbLesson.sectionId
+    if (!sectionId) return course.chapters || []
+    return (course.chapters || []).filter(ch => ch.sectionId === sectionId)
+  }, [course, dbLesson])
+
+  // --- EARLY RETURNS AFTER ALL HOOKS ---
+  if (!course || !dbLesson) return <Navigate to="/courses" replace />
 
   const lesson = localLesson || dbLesson
 
   // Use slug-based key to match AppContext's completedChapters store
   const doneKey = `${course.id}:${lesson.slug}`
   const isDone = Boolean(state.completedChapters?.[doneKey])
+
+  // Strict Learning: Check if previous lesson is completed
+  const prevDoneKey = adjacent.prev ? `${course.id}:${adjacent.prev.slug}` : null
+  const isLocked = Boolean(prevDoneKey) && adjacent.prev && !state.completedChapters?.[prevDoneKey]
+
+  if (isLocked) {
+    toast.error('Complete the previous chapter first!', { id: 'locked-chapter' })
+    return <Navigate to={`/chapter/${courseId}/${adjacent.prev.slug}`} replace />
+  }
 
   const handleAIEnhance = async () => {
     if (isEnhancing) return
@@ -200,17 +223,6 @@ export default function ChapterPage() {
     }
   }
 
-
-
-  // Strict Learning: Check if previous lesson is completed
-  const prevDoneKey = adjacent.prev ? `${course.id}:${adjacent.prev.slug}` : null
-  const isLocked = Boolean(prevDoneKey) && adjacent.prev && !state.completedChapters?.[prevDoneKey]
-
-  if (isLocked) {
-    toast.error('Complete the previous chapter first!', { id: 'locked-chapter' })
-    return <Navigate to={`/chapter/${courseId}/${adjacent.prev.slug}`} replace />
-  }
-
   const theoryKey = language === 'hi' ? 'hindi' : language
   const chapterOverview = lesson.chapterOverview || lesson.content || ''
   
@@ -218,12 +230,6 @@ export default function ChapterPage() {
   const isTheoryArray = Array.isArray(lesson.theory)
   const legacyTheory = typeof lesson.theory === 'string' ? lesson.theory : (lesson.theory?.[theoryKey] || lesson.theory?.english || '')
 
-  const allChapters = useMemo(() => {
-    if (!course || !dbLesson) return []
-    const sectionId = dbLesson.sectionId
-    if (!sectionId) return course.chapters || []
-    return (course.chapters || []).filter(ch => ch.sectionId === sectionId)
-  }, [course, dbLesson])
   const total = allChapters.length
   const completed = allChapters.filter((item) => state.completedChapters?.[`${course.id}:${item.slug}`]).length
   const progressPercent = total > 0 ? Math.round((completed / total) * 100) : 0

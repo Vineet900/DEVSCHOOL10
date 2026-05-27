@@ -1,6 +1,8 @@
 import app from './app.js';
 import { config } from './config/index.js';
 import { logger } from './lib/logger.js';
+import { aiFastWorker, aiSlowWorker } from './workers/ai.worker.js';
+import { redisClient } from './lib/redis.js';
 
 const PORT = config.port;
 
@@ -14,13 +16,34 @@ const server = app.listen(PORT, () => {
 // AWS ECS / Docker sends SIGTERM before killing the container.
 // We stop accepting new connections and let in-flight requests finish.
 
-const shutdown = (signal: string) => {
+const shutdown = async (signal: string) => {
   logger.info(`\n${signal} received. Starting graceful shutdown...`);
 
-  server.close(() => {
-    logger.info('✅ All connections closed. Server stopped.');
+  try {
+    // 1. Stop accepting new HTTP requests
+    server.close(() => {
+      logger.info('✅ Express server closed (no new connections).');
+    });
+
+    // 2. Safely close BullMQ worker (wait for active jobs to finish)
+    logger.info('⏳ Closing AI worker gracefully...');
+    await Promise.all([
+    aiFastWorker.close(),
+    aiSlowWorker.close()
+  ]);
+    logger.info('✅ AI worker closed.');
+
+    // 3. Disconnect Redis
+    logger.info('⏳ Disconnecting Redis...');
+    await redisClient.quit();
+    logger.info('✅ Redis disconnected.');
+
+    logger.info('✅ All connections closed. Server stopped safely.');
     process.exit(0);
-  });
+  } catch (error) {
+    logger.error('❌ Error during graceful shutdown:', error);
+    process.exit(1);
+  }
 
   // Force kill if still alive after 30 seconds
   setTimeout(() => {

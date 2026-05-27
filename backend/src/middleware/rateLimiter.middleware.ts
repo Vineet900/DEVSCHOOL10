@@ -1,9 +1,16 @@
 import rateLimit from 'express-rate-limit';
+import RedisStore from 'rate-limit-redis';
 import type { Request, Response } from 'express';
+import { redisClient } from '../lib/redis.js';
 
 // ─── Rate Limiter Configurations ──────────────────────────────────────────────
-// Uses express-rate-limit v7 with in-memory store.
-// TODO: For multi-instance deployments, replace MemoryStore with RedisStore
+// Uses express-rate-limit v7 with RedisStore for multi-instance deployments.
+
+const getRedisStore = (prefix: string) => new RedisStore({
+  // @ts-expect-error - rate-limit-redis types mismatch slightly with ioredis
+  sendCommand: (...args: string[]) => redisClient.call(...args),
+  prefix: `rl:${prefix}:`,
+});
 
 const rateLimitResponse = (_req: Request, res: Response): void => {
   res.status(429).json({
@@ -19,7 +26,7 @@ const rateLimitResponse = (_req: Request, res: Response): void => {
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
-  // v7: use default key generator (handles IPv6 properly)
+  store: getRedisStore('login'),
   handler: rateLimitResponse,
   standardHeaders: true,
   legacyHeaders: false,
@@ -30,6 +37,7 @@ export const loginLimiter = rateLimit({
 export const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
+  store: getRedisStore('register'),
   handler: rateLimitResponse,
   standardHeaders: true,
   legacyHeaders: false,
@@ -39,6 +47,7 @@ export const registerLimiter = rateLimit({
 export const otpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
+  store: getRedisStore('otp'),
   handler: rateLimitResponse,
   standardHeaders: true,
   legacyHeaders: false,
@@ -50,9 +59,10 @@ export const otpLimiter = rateLimit({
 export const aiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
+  store: getRedisStore('ai'),
   // Key by user ID (from JWT) — not IP (VPN bypass protection)
-  // Falls back to default IP-based key if user not set
-  keyGenerator: (req) => req.user?.id ?? 'anon',
+  // Falls back to IP if user not set
+  keyGenerator: (req) => req.user?.id ?? req.socket.remoteAddress ?? 'unknown',
   handler: rateLimitResponse,
   standardHeaders: true,
   legacyHeaders: false,
@@ -65,8 +75,9 @@ export const aiLimiter = rateLimit({
 export const quizSubmitLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
   max: 5,
+  store: getRedisStore('quiz'),
   keyGenerator: (req) =>
-    `${req.user?.id ?? 'anon'}:quiz:${req.params['id'] ?? 'unknown'}`,
+    `${req.user?.id ?? req.socket.remoteAddress ?? 'unknown'}:quiz:${req.params['id'] ?? 'unknown'}`,
   handler: rateLimitResponse,
   standardHeaders: true,
   legacyHeaders: false,
@@ -76,7 +87,8 @@ export const quizSubmitLimiter = rateLimit({
 export const progressLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
-  keyGenerator: (req) => req.user?.id ?? 'anon',
+  store: getRedisStore('progress'),
+  keyGenerator: (req) => req.user?.id ?? req.socket.remoteAddress ?? 'unknown',
   handler: rateLimitResponse,
   standardHeaders: true,
   legacyHeaders: false,
@@ -86,7 +98,8 @@ export const progressLimiter = rateLimit({
 export const redeemLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
-  keyGenerator: (req) => req.user?.id ?? 'anon',
+  store: getRedisStore('redeem'),
+  keyGenerator: (req) => req.user?.id ?? req.socket.remoteAddress ?? 'unknown',
   handler: rateLimitResponse,
   standardHeaders: true,
   legacyHeaders: false,
@@ -96,7 +109,7 @@ export const redeemLimiter = rateLimit({
 export const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 200,
-  // Use default keyGenerator (handles IPv6 properly)
+  store: getRedisStore('general'),
   handler: rateLimitResponse,
   standardHeaders: true,
   legacyHeaders: false,
